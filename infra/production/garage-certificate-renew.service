@@ -1,0 +1,14 @@
+[Unit]
+Description=Renew only garage.byjin.cn certificate after validation
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/garage-publisher
+ExecStart=/www/server/panel/pyenv/bin/python3 /opt/garage-publisher/maintenance/renew-garage-certificate.py
+UMask=0077
+TimeoutStartSec=20min
+NoNewPrivileges=true
+PrivateTmp=true

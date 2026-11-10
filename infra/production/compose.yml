@@ -1,0 +1,71 @@
+name: garage-publisher
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: prototype
+      POSTGRES_USER: prototype
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a generated URL-safe database password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U prototype -d prototype"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+  app:
+    build:
+      context: ../..
+      dockerfile: infra/backend.Dockerfile
+      args:
+        GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
+    environment:
+      DATABASE_URL: postgres://prototype:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/prototype?sslmode=disable
+      LISTEN_ADDR: :8081
+      DATA_DIR: /data
+      PUBLIC_SCHEME: https
+      PUBLIC_DOMAIN: ${ADMIN_DOMAIN:-garage.byjin.cn}
+      PUBLIC_PORT: "443"
+      PUBLIC_URL_MODE: path
+      SHARED_ORIGIN: "true"
+      CONSOLE_URL: https://${ADMIN_DOMAIN:-garage.byjin.cn}
+      ADMIN_HOSTS: ${ADMIN_DOMAIN:-garage.byjin.cn}
+      INIT_ADMIN_USERNAME: ${INIT_ADMIN_USERNAME:-admin}
+      INIT_ADMIN_PASSWORD: ${INIT_ADMIN_PASSWORD:?Set a generated initial admin password}
+      GOMEMLIMIT: 512MiB
+    volumes:
+      - release_data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    mem_limit: 768m
+    cpus: 1.0
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+  web:
+    build:
+      context: ../..
+      dockerfile: infra/production/web.Dockerfile
+    environment:
+      ADMIN_DOMAIN: ${ADMIN_DOMAIN:-garage.byjin.cn}
+      NGINX_ENVSUBST_FILTER: ^ADMIN_DOMAIN$$
+    ports:
+      - "127.0.0.1:${HTTP_PORT:-18080}:80"
+    depends_on:
+      - app
+    restart: unless-stopped
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+volumes:
+  postgres_data:
+  release_data:

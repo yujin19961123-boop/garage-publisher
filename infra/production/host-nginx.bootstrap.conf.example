@@ -1,0 +1,14 @@
+# HTTP-only certificate bootstrap; use only for the new garage.byjin.cn site.
+# Do not add global/default_server listeners or modify any other site.
+# Verify the ACME client uses this exact webroot before issuing a certificate.
+server {
+    listen 80;
+    server_name garage.byjin.cn;
+    location ^~ /.well-known/acme-challenge/ {
+        root /www/wwwroot/garage.byjin.cn;
+        default_type text/plain;
+        try_files $uri =404;
+    }
+    # Do not expose administration login over HTTP while TLS is pending.
+    location / { return 503; }
+}

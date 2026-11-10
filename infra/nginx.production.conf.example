@@ -1,0 +1,53 @@
+# byjin.cn/<slug>/ serves public prototypes. UI/API only on console.byjin.cn.
+# Certificate SAN must cover byjin.cn AND console.byjin.cn.
+server {
+    listen 80 default_server;
+    server_name _;
+    return 444;
+}
+server {
+    listen 80;
+    server_name byjin.cn console.byjin.cn;
+    return 301 https://$host$request_uri;
+}
+server {
+    listen 443 ssl default_server;
+    server_name _;
+    ssl_reject_handshake on;
+}
+server {
+    listen 443 ssl;
+    server_name console.byjin.cn;
+    ssl_certificate /etc/nginx/certs/byjin/fullchain.pem;
+    ssl_certificate_key /etc/nginx/certs/byjin/privkey.pem;
+    root /usr/share/nginx/html;
+    client_max_body_size 101m;
+    client_body_timeout 600s;
+    add_header X-Content-Type-Options nosniff always;
+    add_header Cache-Control no-store always;
+    location /api/ {
+        proxy_pass http://app:8081;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_request_buffering off;
+        proxy_read_timeout 600s;
+    }
+    location = /healthz {
+        proxy_pass http://app:8081;
+        proxy_set_header Host $http_host;
+    }
+    location / { try_files $uri $uri/ /index.html; }
+}
+server {
+    listen 443 ssl;
+    server_name byjin.cn;
+    ssl_certificate /etc/nginx/certs/byjin/fullchain.pem;
+    ssl_certificate_key /etc/nginx/certs/byjin/privkey.pem;
+    add_header X-Content-Type-Options nosniff always;
+    location = / { return 307 https://console.byjin.cn/; }
+    location / {
+        proxy_pass http://app:8081;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+}

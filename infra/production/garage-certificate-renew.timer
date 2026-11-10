@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily garage.byjin.cn certificate expiry check
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=1h
+Persistent=true
+Unit=garage-certificate-renew.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,32 @@
+# REFERENCE ONLY: create/merge only the garage.byjin.cn site after host inspection.
+# Preserve existing BaoTa-managed ACME/certificate includes and all other sites.
+server {
+    listen 80;
+    server_name garage.byjin.cn;
+    # This must match the webroot used by the server's ACME client.
+    location ^~ /.well-known/acme-challenge/ {
+        root /www/wwwroot/garage.byjin.cn;
+        default_type text/plain;
+        try_files $uri =404;
+    }
+    location / { return 301 https://garage.byjin.cn$request_uri; }
+}
+server {
+    listen 443 ssl;
+    server_name garage.byjin.cn;
+    # Replace only after certificate issuance with this host's real paths.
+    ssl_certificate /REPLACE_WITH_REAL_CERT_PATH/fullchain.pem;
+    ssl_certificate_key /REPLACE_WITH_REAL_CERT_PATH/privkey.pem;
+    client_max_body_size 101m;
+    client_body_timeout 600s;
+    location / {
+        proxy_pass http://127.0.0.1:18080;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_request_buffering off;
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+    }
+}

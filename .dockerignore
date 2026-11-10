@@ -1,0 +1,9 @@
+.tools
+.local
+.env
+.git
+**/node_modules
+frontend/dist
+backend/server*
+dist.zip
+*.log
