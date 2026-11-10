@@ -25,6 +25,33 @@ jobs:
       - run: go test ./...
       - run: go vet ./...
 
+  version-integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: garage_test
+          POSTGRES_USER: garage_test
+          POSTGRES_PASSWORD: garage_ci_test_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U garage_test -d garage_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://garage_test:garage_ci_test_only@127.0.0.1:5432/garage_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version: '1.26.x'
+          cache-dependency-path: backend/go.sum
+      - run: go test -run '^TestVersions' -v ./...
+        working-directory: backend
+
   frontend:
     runs-on: ubuntu-latest
     steps:
@@ -39,3 +66,4 @@ jobs:
       - run: npm run build
         working-directory: frontend
       - run: node scripts/test-upload-inputs.mjs
+      - run: node scripts/package-production.mjs

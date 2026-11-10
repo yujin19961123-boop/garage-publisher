@@ -24,7 +24,7 @@ assert.ok(typeof credentials.username==='string'&&credentials.username&&typeof c
 const origin=target.origin;
 const pass=message=>console.log('PASS: '+message);
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-let cookie='',csrf='',ownerId='',browser,context,project=null,deleted=false;
+let cookie='',csrf='',ownerId='',browser,context,project=null,deleted=false,initialProjects=null,initialUsers=null;
 const testName='Garage smoke '+Date.now().toString(36)+' '+randomBytes(4).toString('hex');
 const activeTasks=new Set();
 
@@ -55,11 +55,29 @@ async function taskResult(id,timeout=180000){
  throw new Error('Deployment did not finish within the production smoke timeout.');
 }
 async function publish(bytes,expected){
+ await readyForUpload();
  const {data:deployment}=await api('/projects/'+project.id+'/deployments','POST',{});
  activeTasks.add(deployment.id);
  await api('/deployments/'+deployment.id+'/archive','PUT',bytes,202);
  const result=await taskResult(deployment.id);
  assert.equal(result.status,expected,'Unexpected deployment result.');
+ return result;
+}
+function projectSnapshot(items){return items.map(p=>({id:p.id,name:p.name,url:p.url,ownerId:p.ownerId,currentReleaseId:p.currentReleaseId??null})).sort((a,b)=>a.id.localeCompare(b.id));}
+function userSnapshot(items){return items.map(u=>({id:u.id,username:u.username,role:u.role,status:u.status})).sort((a,b)=>a.id.localeCompare(b.id));}
+async function existingUnchanged(){
+ if(!initialProjects)return;
+ const {data:projects}=await api('/projects'),{data:users}=await api('/admin/users');
+ assert.ok(JSON.stringify(projectSnapshot(projects.items))===JSON.stringify(initialProjects),'Existing projects changed or temporary project was not removed.');
+ assert.ok(JSON.stringify(userSnapshot(users.items))===JSON.stringify(initialUsers),'Existing account set or state changed.');
+}
+async function readyForUpload(){
+ for(let attempt=0;attempt<120;attempt++){
+  const {data}=await api('/projects/'+project.id+'/versions');
+  if(!data.busy&&!data.cleanupPending)return;
+  await sleep(500);
+ }
+ throw Error('Temporary project is still publishing or cleaning files.');
 }
 function checkedPublicURL(value){
  const result=new URL(value);
@@ -109,8 +127,10 @@ try{
  credentials.password=''; // Keep credentials out of output and later error objects.
  pass('HTTPS login and __Host- Secure HttpOnly host-only cookie');
  const {data:initial}=await api('/projects');
- assert.equal(initial.items.length,0,'Expected an empty production platform; existing projects are never removed.');
- pass('initial project list is empty');
+ initialProjects=projectSnapshot(initial.items);
+ const {data:initialAccounts}=await api('/admin/users');initialUsers=userSnapshot(initialAccounts.items);
+ const ownPublishedCount=initial.items.filter(p=>p.ownerId===ownerId&&p.currentReleaseId).length;
+ pass('existing accounts and project identity/current-release fields snapshotted without modification');
 
  browser=await chromium.launch({channel:'chrome',headless:true});
  context=await browser.newContext({viewport:{width:1440,height:1000},ignoreHTTPSErrors:false});
@@ -121,21 +141,48 @@ try{
  assert.equal(project.ownerId,ownerId,'Temporary project ownership mismatch.');
  const fixedURL=checkedPublicURL(project.url);
  await publish(archive('v1'),'SUCCEEDED');await renderVersion(preview,fixedURL,'v1');
+ const {data:first}=await api('/projects/'+project.id);assert.equal(first.currentVersionNumber,1);assert.ok(first.currentReleaseId);
  pass('real ZIP published, HTML/JS rendered v1 and CSS applied in Chrome');
  await publish(archive('v2'),'SUCCEEDED');
  const {data:updated}=await api('/projects/'+project.id);
  assert.equal(updated.url,fixedURL,'Updating must preserve the public URL.');
+ assert.equal(updated.currentVersionNumber,2);assert.ok(updated.currentReleaseId&&updated.currentReleaseId!==first.currentReleaseId);
  await renderVersion(preview,fixedURL,'v2');
  pass('same public URL renders v2 after update');
+ const {data:versions}=await api('/projects/'+project.id+'/versions');
+ assert.equal(versions.retentionLimit,5);assert.deepEqual(versions.items.map(v=>v.versionNumber),[2,1]);
+ assert.ok(versions.items.every(v=>v.filesState==='available'));
+ const {data:logs}=await api('/projects/'+project.id+'/deployments');assert.equal(logs.items.length,2);
+ const {data:rolled}=await api('/projects/'+project.id+'/versions/'+first.currentReleaseId+'/activate','POST',{expectedCurrentReleaseId:updated.currentReleaseId});
+ assert.equal(rolled.currentReleaseId,first.currentReleaseId);await renderVersion(preview,fixedURL,'v1');
+ const {data:restored}=await api('/projects/'+project.id+'/versions/'+updated.currentReleaseId+'/activate','POST',{expectedCurrentReleaseId:first.currentReleaseId});
+ assert.equal(restored.currentReleaseId,updated.currentReleaseId);await renderVersion(preview,fixedURL,'v2');
+ const {data:afterSwitch}=await api('/projects/'+project.id);assert.equal(afterSwitch.url,fixedURL);
+ assert.equal((await api('/projects/'+project.id+'/deployments')).data.items.length,2,'Switching must not create upload records.');
+ pass('independent version APIs retain two versions; rollback v1 and return v2 preserve URL and upload history');
+ const versionPage=await context.newPage();await versionPage.goto(origin+'/',{waitUntil:'networkidle'});
+ await versionPage.getByRole('heading',{name:'项目列表',exact:true}).waitFor();
+ const tempCard=versionPage.locator('article.project').filter({has:versionPage.getByRole('heading',{name:testName,exact:true})});
+ await tempCard.getByRole('button',{name:'版本管理',exact:true}).click();
+ const versionDialog=versionPage.getByRole('dialog',{name:'版本管理',exact:true});await versionDialog.waitFor();
+ await versionDialog.getByTestId('version-history').waitFor();
+ await versionDialog.getByRole('heading',{name:'可切换版本',exact:true}).waitFor();
+ await versionDialog.getByText('当前版本 v2',{exact:true}).waitFor();
+ await versionDialog.getByRole('button',{name:'切换到 v1',exact:true}).waitFor();
+ assert.equal(await versionDialog.locator('input[type="file"]').count(),0,'Version management must be separate from uploading.');
+ await versionPage.close();
+ pass('new project-list UI opens independent version management with current version and switch target');
  await publish(strToU8('invalid zip production smoke'),'FAILED');
  await renderVersion(preview,fixedURL,'v2');
+ assert.equal((await api('/projects/'+project.id)).data.currentReleaseId,updated.currentReleaseId);
+ assert.deepEqual((await api('/projects/'+project.id+'/versions')).data.items.map(v=>v.id),versions.items.map(v=>v.id));
  pass('invalid ZIP failed while v2 remains available');
  const {data:share}=await api('/share-page','POST',{});
- assert.equal(share.publishedCount,1);
+ assert.equal(share.publishedCount,ownPublishedCount+1);
  const shareURL=checkedPublicURL(share.url);
  await preview.goto(shareURL,{waitUntil:'domcontentloaded'});
  await preview.getByRole('heading',{name:testName,exact:true}).waitFor();
- const sharedLink=preview.getByRole('link',{name:'打开原型 ↗'});
+ const sharedLink=preview.locator('article').filter({has:preview.getByRole('heading',{name:testName,exact:true})}).getByRole('link');
  assert.equal(await sharedLink.getAttribute('href'),fixedURL);
  pass('public share page includes the published project');
  await removeOwnTestProject();
@@ -145,17 +192,18 @@ try{
  assert.equal(await preview.getByRole('heading',{name:testName,exact:true}).count(),0);
  pass('only the temporary project deleted; old link is 404 and share entry removed');
 
- const {data:final}=await api('/projects');assert.equal(final.items.length,0,'Platform must finish with zero projects.');
+ await existingUnchanged();
+ const {data:final}=await api('/projects');assert.equal(final.items.length,initialProjects.length);
  const consolePage=await context.newPage();await consolePage.goto(origin+'/',{waitUntil:'networkidle'});
  await consolePage.getByRole('heading',{name:'项目列表',exact:true}).waitFor();
- await consolePage.getByRole('heading',{name:'发布你的第一个原型',exact:true}).waitFor();
- assert.equal(await consolePage.locator('.project').count(),0);
+ assert.equal(await consolePage.locator('article.project').count(),initialProjects.length);
  mkdirSync(path.join(workspace,'.local'),{recursive:true});
  await consolePage.screenshot({path:path.join(workspace,'.local/garage-online.png'),fullPage:true});
- pass('final zero-project HTTPS dashboard and empty-state screenshot saved to .local/garage-online.png');
+ pass('existing account/project snapshots unchanged; final HTTPS project list screenshot saved');
 }catch(error){failure=error;}
 finally{
  try{await removeOwnTestProject();}catch{console.error('Cleanup could not be confirmed for this run’s temporary project only. No existing project was deleted.');failure ||= new Error('Temporary project cleanup requires inspection.');}
+ try{await existingUnchanged();}catch(error){failure ||= error;}
  if(browser)await browser.close();
  if(cookie&&csrf){try{await api('/auth/logout','POST');}catch{console.error('Test session logout could not be confirmed.');}}
 }

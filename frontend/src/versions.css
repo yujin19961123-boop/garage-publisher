@@ -1,0 +1,42 @@
+.version-project-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding-bottom: 19px; margin-bottom: 15px; border-bottom: 1px solid var(--line); }
+.version-project-heading > strong { font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
+.version-history { min-width: 0; padding-top: 14px; overflow-wrap: anywhere; }
+.version-heading, .version-log-heading { display: flex; align-items: center; justify-content: space-between; gap: 15px; margin: 12px 0; }
+.version-heading h3, .version-log-heading h3 { margin: 0; font-size: 17px; }
+.version-refresh { min-height: 42px; padding: 8px 12px; font-size: 12px; background: transparent; }
+.version-loading, .version-empty { padding: 14px 0; color: var(--muted); font-size: 13px; }
+.version-list, .version-log { margin: 15px 0; padding: 0; list-style: none; }
+.version-item { display: flex; align-items: center; justify-content: space-between; gap: 15px; padding: 15px; margin-bottom: 9px; border: 1px solid #d6dfd2; border-radius: 13px; background: #fafbf6b0; }
+.version-item.is-current { border-color: #b2c7af; background: #e4edde; }
+.version-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 7px 10px; min-width: 0; }
+.version-meta > strong { font-size: 17px; color: #536d54; }
+.version-meta time { min-width: 0; flex-basis: 100%; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+.version-current { display: inline-block; padding: 2px 7px; border-radius: 7px; color: #526f4d; background: #d3e1c8; font-size: 10px; font-weight: 500; white-space: nowrap; }
+.version-item > button { flex-shrink: 0; min-height: 42px; padding: 8px 12px; font-size: 12px; }
+.version-unavailable { font-size: 11px; color: #956d5c; }
+.version-confirm { margin: 18px 0; padding: 19px; border: 1px solid #b9cbb2; border-radius: 14px; color: #516b4d; background: #e4edde; }
+.version-confirm > strong { font-size: 15px; }
+.version-confirm p { margin: 10px 0; color: #72866a; font-size: 12px; line-height: 1.9; }
+.version-confirm .share-actions { margin-bottom: 0; }
+.version-log-heading { border-top: 1px solid var(--line); margin-top: 28px; padding-top: 22px; flex-wrap: wrap; }
+.version-log > li { min-width: 0; padding: 15px 0; border-bottom: 1px solid #dce4d5; font-size: 12px; overflow-wrap: anywhere; }
+.version-log-top { display: flex; flex-wrap: wrap; align-items: center; gap: 9px 14px; margin-bottom: 5px; }
+.version-log-top > strong { font-size: 13px; font-weight: 600; }
+.version-log-top > span { font-size: 11px; color: #79946f; }
+.version-log time, .version-files { color: var(--muted); font-size: 11px; }
+.version-files { display: inline-block; margin-left: 12px; }
+.version-log-top > .version-failed, .version-log-error { color: #a16c59; }
+.version-log-error { margin: 8px 0 0; font-size: 12px; overflow-wrap: anywhere; }
+.version-more { width: 100%; margin-top: 5px; font-size: 12px; }
+.current-version-label, .link-panel > .current-version-label { display: inline-block; color: #5a7654; font-size: 12px; font-weight: 600; }
+@media(max-width:560px) {
+ .version-item { padding: 13px 11px; gap: 9px; }
+ .version-meta { gap: 6px; }
+ .version-meta > strong { font-size: 16px; }
+ .version-heading { align-items: flex-start; }
+ .version-heading h3 { padding-top: 8px; font-size: 16px; }
+ .version-refresh { padding-inline: 9px; font-size: 11px; }
+ .version-item > button { padding-inline: 10px; font-size: 11px; }
+ .version-confirm { padding: 16px; }
+ .version-files { display: block; margin: 4px 0 0; }
+}

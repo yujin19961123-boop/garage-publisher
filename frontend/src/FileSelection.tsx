@@ -1,6 +1,6 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {collectDropped, selectionFromFiles, validateSelection, type Selection, type UploadLimits} from './upload-input';
-const mb=(n:number)=>(n/1000000).toFixed(1)+' MB';
+const mb=(n:number)=>n<1000?n+' B':n<1000000?(n/1000).toFixed(1)+' KB':(n/1000000).toFixed(1)+' MB';
 export function FileSelection({value,onChange,disabled,limits,onBusyChange}:{value:Selection|null;onChange:(value:Selection|null)=>void;disabled:boolean;limits:UploadLimits;onBusyChange?:(busy:boolean)=>void}){
  const folder=useRef<HTMLInputElement>(null),files=useRef<HTMLInputElement>(null),alive=useRef(true),reading=useRef(false);
  const [error,setError]=useState(''),[collecting,setCollecting]=useState(false),[drag,setDrag]=useState(false);
@@ -23,8 +23,8 @@ export function FileSelection({value,onChange,disabled,limits,onBusyChange}:{val
    <div className="selected-file-heading"><span className="selected-file-check" aria-hidden="true">✓</span><strong>文件已选好</strong></div>
    <div className="selected-file-card"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><path d={folderName?'M3 7V5a1 1 0 0 1 1-1h5l2 3h9a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7Z':'M6 3h8l4 4v14H6V3Zm8 0v5h4M9 12h6M9 16h6'}/></svg><div><strong className="selected-file-name" title={selectionName}>{selectionName}</strong><span>{value.items.length} 个文件 · {mb(total)}</span></div></div>
    {!folderName&&value.items.length>1&&<p className="selected-file-preview">{value.items.slice(0,3).map(item=>item.file.name).join('、')}{value.items.length>3?' 等':''}</p>}
-   <p className="selected-file-hint">{disabled?'文件处理中，请稍候…':'已准备好，点击下方发布按钮后开始上传。'}</p>
-  </div>:!collecting&&<><strong>拖入原型文件夹、文件或 ZIP</strong><p className="small muted">整个文件夹或里面的全部内容都可以，无需自己打包。</p></>}
+   {disabled&&<p className="selected-file-hint">正在处理文件…</p>}
+  </div>:!collecting&&<><svg className="drop-art" aria-hidden="true" viewBox="0 0 64 64" fill="none"><path d="M32 43V12m0 0L19 25m13-13 13 13M12 41v12h40V41" stroke="currentColor" strokeWidth="3" strokeLinejoin="miter"/></svg><strong className="drop-title">拖进来，准备发布。</strong><p className="small muted">文件夹 / 文件 / ZIP</p></>}
   {collecting&&<p role="status" className="file-reading-state">正在读取文件，请稍候…</p>}
   <div className="file-selection-actions"><button type="button" disabled={locked} onClick={()=>folder.current?.click()}>{selected?'更换文件夹':'选择文件夹'}</button><button type="button" disabled={locked} onClick={()=>files.current?.click()}>{selected?'更换文件':'选择文件'}</button></div>
   <input ref={folder} hidden type="file" multiple {...({webkitdirectory:'',directory:''} as React.InputHTMLAttributes<HTMLInputElement>)} disabled={locked} aria-label="选择原型文件夹" onChange={e=>{const list=Array.from(e.currentTarget.files||[]);e.currentTarget.value='';if(list.length)void accept(async()=>selectionFromFiles(list));}}/>

@@ -2,7 +2,11 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	_ "embed"
+	"encoding/base64"
 	"errors"
+	"fmt"
 	"github.com/jackc/pgx/v5"
 	"html/template"
 	"net/http"
@@ -73,11 +77,32 @@ type shareView struct {
 	Count int
 }
 
-var shareTemplate = template.Must(template.New("share").Parse(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>原型合集</title><style>*{box-sizing:border-box}body{margin:0;background:#f4f6fa;color:#1e293b;font:16px/1.65 system-ui,-apple-system,"Microsoft YaHei",sans-serif}main{max-width:1080px;margin:auto;padding:56px 24px}header{margin-bottom:32px}h1{font-size:34px;letter-spacing:-1px;margin:0 0 8px}.muted{color:#64748b}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:20px}article{padding:26px;background:white;border:1px solid #e2e8f0;border-radius:16px;display:flex;flex-direction:column}h2{font-size:21px;overflow-wrap:anywhere;margin:0 0 12px}.date{font-size:13px;margin-top:20px}a{display:inline-block;color:#4338ca;text-decoration:none;font-weight:650;margin-top:18px}a:hover{text-decoration:underline}.empty{padding:60px 24px;text-align:center;background:white;border-radius:16px;border:1px solid #e2e8f0}footer{margin-top:36px;font-size:13px;color:#64748b}</style></head><body><main><header><h1>原型合集</h1><div class="muted">共 {{.Count}} 个已发布原型</div></header>{{if .Items}}<div class="grid">{{range .Items}}<article><h2>{{.Name}}</h2>{{if .Published}}<div class="date muted">最近发布：{{.Published}}</div>{{end}}<a href="{{.URL}}" target="_blank" rel="noopener noreferrer">打开原型 ↗</a></article>{{end}}</div>{{else}}<div class="empty muted">暂无已发布原型</div>{{end}}<footer>持有链接即可查看 · 内容随发布自动更新</footer></main></body></html>`))
+// Assets are embedded so the anonymous collection has no frontend or external
+// resource dependency. Only this exact interaction script is allowed by CSP.
+//
+//go:embed share.html
+var shareHTML string
+
+//go:embed share.css
+var shareCSS string
+
+//go:embed share.js
+var shareJS string
+
+var shareTemplate = template.Must(template.New("share").Funcs(template.FuncMap{
+	"style":   func() template.CSS { return template.CSS(shareCSS) },
+	"script":  func() template.JS { return template.JS(shareJS) },
+	"ordinal": func(n int) string { return fmt.Sprintf("%02d", n+1) },
+}).Parse(shareHTML))
+
+func shareCSP() string {
+	hash := sha256.Sum256([]byte(shareJS))
+	return "default-src 'none'; style-src 'unsafe-inline'; script-src 'sha256-" + base64.StdEncoding.EncodeToString(hash[:]) + "'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+}
 
 func (a *app) publicSharePage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+	w.Header().Set("Content-Security-Policy", shareCSP())
 	w.Header().Set("X-Frame-Options", "DENY")
 	if r.Method != "GET" && r.Method != "HEAD" {
 		w.Header().Set("Allow", "GET, HEAD")

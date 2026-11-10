@@ -10,3 +10,25 @@ CREATE TABLE IF NOT EXISTS share_pages(owner_id text PRIMARY KEY REFERENCES user
 ALTER TABLE projects DROP COLUMN IF EXISTS description;
 CREATE TABLE IF NOT EXISTS deleted_project_slugs(public_id text PRIMARY KEY, deleted_at timestamptz NOT NULL DEFAULT now());
 CREATE TABLE IF NOT EXISTS project_cleanup_jobs(project_id text PRIMARY KEY, deployment_ids text[] NOT NULL, attempts integer NOT NULL DEFAULT 0, last_error text NOT NULL DEFAULT '', created_at timestamptz NOT NULL DEFAULT now());
+
+ALTER TABLE releases ADD COLUMN IF NOT EXISTS version_number integer;
+ALTER TABLE releases ADD COLUMN IF NOT EXISTS expired_at timestamptz;
+ALTER TABLE releases ADD COLUMN IF NOT EXISTS cleaned_at timestamptz;
+ALTER TABLE releases ADD COLUMN IF NOT EXISTS manifest_ready boolean NOT NULL DEFAULT false;
+ALTER TABLE deployments ADD COLUMN IF NOT EXISTS files_cleaned_at timestamptz;
+WITH numbered AS (
+ SELECT r.id, COALESCE((SELECT max(old.version_number) FROM releases old WHERE old.project_id=r.project_id),0)
+ + row_number() OVER (PARTITION BY r.project_id ORDER BY r.created_at,r.id) AS number
+ FROM releases r WHERE r.version_number IS NULL
+) UPDATE releases r SET version_number=n.number FROM numbered n WHERE r.id=n.id;
+ALTER TABLE releases ALTER COLUMN version_number SET NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS release_project_version ON releases(project_id,version_number);
+CREATE INDEX IF NOT EXISTS retained_release_lookup ON releases(project_id,version_number DESC) WHERE expired_at IS NULL;
+CREATE INDEX IF NOT EXISTS deployment_history_order ON deployments(project_id,created_at DESC,id DESC);
+CREATE INDEX IF NOT EXISTS failed_deployment_cleanup ON deployments(project_id,id) WHERE status='FAILED' AND files_cleaned_at IS NULL;
+CREATE TABLE IF NOT EXISTS version_cleanup_jobs(
+ deployment_id text PRIMARY KEY REFERENCES deployments(id) ON DELETE CASCADE,
+ project_id text NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+ attempts integer NOT NULL DEFAULT 0, last_error text NOT NULL DEFAULT '', created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS version_cleanup_project ON version_cleanup_jobs(project_id);

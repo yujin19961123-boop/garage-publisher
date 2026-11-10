@@ -11,6 +11,8 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
+	"syscall"
 
 	"strings"
 	"time"
@@ -22,6 +24,41 @@ const (
 	maxFile     int64 = 100 << 20
 	maxFiles          = 10000
 )
+
+// Windows file scanners can briefly hold a recently written/renamed file.
+// Retry only transient permission/sharing failures, never replace a target.
+func renamePreparedPath(ctx context.Context, source, target string) error {
+	var err error
+	for attempt := 0; attempt < 8; attempt++ {
+		if e := ctx.Err(); e != nil {
+			return e
+		}
+		if _, e := os.Lstat(target); !os.IsNotExist(e) {
+			if e != nil {
+				return e
+			}
+			return fmt.Errorf("publication target already exists")
+		}
+		err = os.Rename(source, target)
+		if err == nil {
+			return nil
+		}
+		if runtime.GOOS != "windows" || (!os.IsPermission(err) && !errors.Is(err, syscall.Errno(32)) && !errors.Is(err, syscall.Errno(33))) {
+			return err
+		}
+		if attempt == 7 {
+			break
+		}
+		timer := time.NewTimer(time.Duration(25*(1<<min(attempt, 4))) * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return err
+}
 
 func unpack(archive, dest string) error {
 	z, e := zip.OpenReader(archive)
@@ -244,6 +281,10 @@ func (a *app) worker(ctx context.Context) {
 			conn.Exec(ctx, "UPDATE deployments SET status='FAILED',error_message='处理进程中断，请重新上传',updated_at=now() WHERE status IN ('VALIDATING','PREPARING')")
 			for {
 				conn.Exec(ctx, "UPDATE deployments SET status='FAILED',error_message='上传超时，请重试',updated_at=now() WHERE id IN (SELECT id FROM deployments WHERE status='UPLOADING' AND updated_at<now()-interval '10 minutes' FOR UPDATE SKIP LOCKED)")
+				if err := a.reconcileVersions(ctx, conn); err != nil {
+					log.Printf("version reconciliation: %v", err)
+				}
+				a.cleanupVersionJobs(ctx, conn)
 				var id, pid, uid, mode string
 				e = conn.QueryRow(ctx, "UPDATE deployments SET status='VALIDATING',updated_at=now() WHERE id=(SELECT id FROM deployments WHERE status='QUEUED' ORDER BY created_at LIMIT 1) RETURNING id,project_id,operator_id,route_mode").Scan(&id, &pid, &uid, &mode)
 				if e != nil {
@@ -278,10 +319,13 @@ func (a *app) worker(ctx context.Context) {
 				}
 				release := filepath.Join(a.data, "releases", pid, id)
 				if e == nil {
+					e = writeVersionManifest(stage)
+				}
+				if e == nil {
 					e = os.MkdirAll(filepath.Dir(release), 0700)
 				}
 				if e == nil {
-					e = os.Rename(stage, release)
+					e = renamePreparedPath(ctx, stage, release)
 				}
 				if e == nil {
 					tx, te := conn.Begin(ctx)
@@ -297,13 +341,16 @@ func (a *app) worker(ctx context.Context) {
 							te = fmt.Errorf("账号已停用或项目权限已变更")
 						}
 						if te == nil {
-							_, te = tx.Exec(ctx, "INSERT INTO releases(id,project_id,deployment_id,route_mode) VALUES($1,$2,$1,$3)", id, pid, mode)
+							_, te = tx.Exec(ctx, "INSERT INTO releases(id,project_id,deployment_id,route_mode,version_number,manifest_ready) SELECT $1,$2,$1,$3,COALESCE(max(version_number),0)+1,true FROM releases WHERE project_id=$2", id, pid, mode)
 						}
 						if te == nil {
 							_, te = tx.Exec(ctx, "UPDATE projects SET current_release_id=$1,last_published_at=now() WHERE id=$2", id, pid)
 						}
 						if te == nil {
 							_, te = tx.Exec(ctx, "UPDATE deployments SET status='SUCCEEDED',updated_at=now() WHERE id=$1", id)
+						}
+						if te == nil {
+							te = expireVersions(ctx, tx, pid)
 						}
 						if te == nil {
 							_, te = tx.Exec(ctx, "INSERT INTO audit_logs(actor_id,action,target_id) VALUES($1,'publish',$2)", uid, pid)

@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/base64"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -23,9 +25,36 @@ func TestShareTemplateEscaping(t *testing.T) {
 }
 func TestShareEmptyPage(t *testing.T) {
 	var b bytes.Buffer
-	shareTemplate.Execute(&b, shareView{})
+	if err := shareTemplate.Execute(&b, shareView{}); err != nil {
+		t.Fatal(err)
+	}
 	if !strings.Contains(b.String(), "暂无已发布原型") {
 		t.Fatal("missing empty state")
+	}
+}
+
+func TestShareInteractionPolicy(t *testing.T) {
+	var b bytes.Buffer
+	if err := shareTemplate.Execute(&b, shareView{Items: []shareItem{{Name: `</script><script>alert(1)</script>`, URL: `https://example.com/demo/`}}, Count: 1}); err != nil {
+		t.Fatal(err)
+	}
+	html := b.String()
+	const start = `<script type="module">`
+	if strings.Count(html, start) != 1 || strings.Count(html, "</script>") != 1 {
+		t.Fatal("untrusted content created an executable script")
+	}
+	_, script, _ := strings.Cut(html, start)
+	script, _, _ = strings.Cut(script, "</script>")
+	hash := sha256.Sum256([]byte(script))
+	policy := shareCSP()
+	if !strings.Contains(policy, "script-src 'sha256-"+base64.StdEncoding.EncodeToString(hash[:])+"'") {
+		t.Fatal("rendered interaction script does not match CSP")
+	}
+	if strings.Contains(policy, "script-src 'unsafe-inline'") || strings.Contains(policy, "script-src 'self'") {
+		t.Fatal("collection must only execute the platform's exact embedded script")
+	}
+	if !strings.Contains(html, `class="project-grid single"`) || !strings.Contains(html, `rel="noopener noreferrer"`) {
+		t.Fatal("single project layout or safe link handling missing")
 	}
 }
 func TestShareInvalidRoutes(t *testing.T) {

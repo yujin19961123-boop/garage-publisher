@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f3f0e9">
+  <meta name="color-scheme" content="light">
+  <title>原型合集 · GARAGE</title>
+  <style>{{style}}</style>
+</head>
+<body>
+  <a class="skip-link" href="#collection">跳到原型列表</a>
+  <header class="topbar">
+    <div class="brand"><svg aria-hidden="true" viewBox="0 0 32 32"><path d="m16 2 14 14-14 14L2 16Z" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="m16 10 6 6-6 6-6-6Z" fill="currentColor"/></svg><span>GARAGE</span></div>
+    <h1 class="collection-label">原型合集</h1>
+  </header>
+  <main>
+    <section id="collection" class="collection" aria-label="已发布原型">
+      <div class="collection-head"><div class="collection-count"><strong>{{printf "%02d" .Count}}</strong><span>个已发布原型</span></div></div>
+      {{if .Items}}
+      <div class="project-grid{{if eq .Count 1}} single{{end}}">
+        {{range $index, $item := .Items}}
+        <article class="project" data-light>
+          <a class="project-link" href="{{.URL}}" target="_blank" rel="noopener noreferrer" aria-labelledby="project-{{$index}} project-open-{{$index}}">
+            <div class="card-top"><span class="card-index" aria-hidden="true">{{ordinal $index}} /</span><span class="published"><span aria-hidden="true">✓</span> 已发布</span></div>
+            <div class="card-title"><h2 id="project-{{$index}}">{{.Name}}</h2>{{if .Published}}<p class="date">最近发布 <time>{{.Published}}</time></p>{{end}}</div>
+            <div class="card-art" aria-hidden="true"><div class="art-sheet sheet-back"></div><div class="art-sheet sheet-front"><span></span><span></span><i></i></div></div>
+            <div class="card-bottom"><span id="project-open-{{$index}}" class="open-label">打开原型 <span aria-hidden="true">↗</span></span><span class="open-arrow" aria-hidden="true">↗</span></div>
+          </a>
+        </article>
+        {{end}}
+      </div>
+      {{else}}
+      <div class="empty"><div class="empty-symbol" aria-hidden="true">◇</div><h2>想法正在酝酿</h2><p>暂无已发布原型</p></div>
+      {{end}}
+    </section>
+    <section class="hero" aria-hidden="true" data-light>
+      <div class="hero-title"><div class="collection-display"><span>原型</span><em>合集<span class="title-dot">。</span></em></div></div>
+      <div class="glass-installation" aria-hidden="true">
+        <div class="orbit orbit-one"></div><div class="orbit orbit-two"></div>
+        <div class="glass-orb"><svg viewBox="0 0 180 180" fill="none">
+          <defs>
+            <linearGradient id="body" x1="28" y1="19" x2="154" y2="164" gradientUnits="userSpaceOnUse"><stop stop-color="#fff" stop-opacity=".86"/><stop offset=".46" stop-color="#c8d6cb" stop-opacity=".48"/><stop offset="1" stop-color="#b2a9c0" stop-opacity=".62"/></linearGradient>
+            <linearGradient id="edge" x1="34" y1="16" x2="145" y2="164" gradientUnits="userSpaceOnUse"><stop stop-color="#fff"/><stop offset=".5" stop-color="#fff" stop-opacity=".12"/><stop offset="1" stop-color="#788d80" stop-opacity=".6"/></linearGradient>
+            <radialGradient id="glow"><stop stop-color="#fff" stop-opacity=".8"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>
+          </defs>
+          <ellipse cx="92" cy="161" rx="49" ry="7" fill="#66786c" fill-opacity=".12"/>
+          <path d="M91 17C126 13 157 41 161 78c4 37-15 72-52 81-35 8-74-7-87-40C8 84 17 45 48 27c13-7 28-8 43-10Z" fill="url(#body)" stroke="url(#edge)" stroke-width="1.2"/>
+          <ellipse class="orb-glow" cx="63" cy="51" rx="49" ry="42" fill="url(#glow)"/>
+          <path d="M39 58C47 39 66 31 84 30" stroke="#fff" stroke-opacity=".88" stroke-width="4" stroke-linecap="round"/>
+          <g class="orb-core"><path d="m89 54 34 34-34 34-34-34Z" fill="#789285" fill-opacity=".1" stroke="#647d6e" stroke-opacity=".7" stroke-width="1.3"/><path d="m76 101 25-25M76 76h25v25" stroke="#5b7568" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></g>
+        </svg></div>
+        <div class="glass-tile tile-one"></div><div class="glass-tile tile-two"></div>
+      </div>
+    </section>
+    <footer><span class="footer-brand">◇ GARAGE</span><span>内容随发布自动更新</span></footer>
+  </main>
+  <script type="module">{{script}}</script>
+</body>
+</html>

@@ -10,7 +10,7 @@ import (
 )
 
 func (a *app) projectList(r *http.Request, i identity, id string) ([]map[string]any, error) {
-	rows, e := a.db.Query(r.Context(), `SELECT p.id,p.public_id,p.owner_id,p.name,p.current_release_id,p.last_published_at FROM projects p WHERE ($1='admin' OR p.owner_id=$2) AND ($3='' OR p.id=$3) ORDER BY p.created_at DESC`, i.Role, i.ID, id)
+	rows, e := a.db.Query(r.Context(), `SELECT p.id,p.public_id,p.owner_id,p.name,p.current_release_id,p.last_published_at,r.version_number FROM projects p LEFT JOIN releases r ON r.id=p.current_release_id WHERE ($1='admin' OR p.owner_id=$2) AND ($3='' OR p.id=$3) ORDER BY p.created_at DESC`, i.Role, i.ID, id)
 	if e != nil {
 		return nil, e
 	}
@@ -20,14 +20,15 @@ func (a *app) projectList(r *http.Request, i identity, id string) ([]map[string]
 		var pid, pub, owner, n string
 		var release *string
 		var published *time.Time
-		if e = rows.Scan(&pid, &pub, &owner, &n, &release, &published); e != nil {
+		var number *int
+		if e = rows.Scan(&pid, &pub, &owner, &n, &release, &published, &number); e != nil {
 			return nil, e
 		}
 		status := "unpublished"
 		if release != nil {
 			status = "published"
 		}
-		items = append(items, map[string]any{"id": pid, "publicId": pub, "ownerId": owner, "name": n, "status": status, "url": a.url(pub), "lastPublishedAt": published})
+		items = append(items, map[string]any{"id": pid, "publicId": pub, "ownerId": owner, "name": n, "status": status, "url": a.url(pub), "lastPublishedAt": published, "currentReleaseId": release, "currentVersionNumber": number})
 	}
 	if e = rows.Err(); e != nil {
 		return nil, e
@@ -96,6 +97,15 @@ func (a *app) projects(w http.ResponseWriter, r *http.Request, i identity, p []s
 	if e := a.owned(ctx, p[1], i.ID); e != nil {
 		return e
 	}
+	if len(p) == 3 && p[2] == "versions" && r.Method == "GET" {
+		return a.versionList(w, r, i, p[1])
+	}
+	if len(p) == 3 && p[2] == "deployments" && r.Method == "GET" {
+		return a.deploymentHistory(w, r, i, p[1])
+	}
+	if len(p) == 5 && p[2] == "versions" && p[4] == "activate" && r.Method == "POST" {
+		return a.activateVersion(w, r, i, p[1], p[3])
+	}
 	if len(p) == 2 && r.Method == "DELETE" {
 		return a.deleteProject(w, r, i, p[1])
 	}
@@ -155,6 +165,13 @@ func (a *app) projects(w http.ResponseWriter, r *http.Request, i identity, p []s
 		}
 		if owner != i.ID {
 			return apiError{403, "FORBIDDEN", "无权操作此项目"}
+		}
+		var cleanupPending bool
+		if e = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM version_cleanup_jobs WHERE project_id=$1)", p[1]).Scan(&cleanupPending); e != nil {
+			return e
+		}
+		if cleanupPending {
+			return apiError{409, "CLEANUP_PENDING", "旧文件正在清理，请稍后再上传；已有版本仍可查看和切换"}
 		}
 		_, e = tx.Exec(ctx, "INSERT INTO deployments(id,project_id,operator_id,status,route_mode) VALUES($1,$2,$3,'UPLOADING',$4)", id, p[1], i.ID, in.RouteMode)
 		if e != nil {
