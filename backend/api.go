@@ -192,21 +192,12 @@ func (a *app) projects(w http.ResponseWriter, r *http.Request, i identity, p []s
 func (a *app) users(w http.ResponseWriter, r *http.Request, i identity, p []string) error {
 	ctx := r.Context()
 	if len(p) == 2 && r.Method == "GET" {
-		rows, e := a.db.Query(ctx, "SELECT id,username,role,status FROM users ORDER BY created_at")
+		items, measuredAt, e := a.memberUsage(ctx)
 		if e != nil {
 			return e
 		}
-		defer rows.Close()
-		v := []user{}
-		for rows.Next() {
-			var u user
-			if e = rows.Scan(&u.ID, &u.Username, &u.Role, &u.Status); e != nil {
-				return e
-			}
-			v = append(v, u)
-		}
-		write(w, map[string]any{"items": v})
-		return rows.Err()
+		write(w, map[string]any{"items": items, "storageMeasuredAt": measuredAt})
+		return nil
 	}
 	if len(p) == 2 && r.Method == "POST" {
 		var in struct{ Username, Password string }

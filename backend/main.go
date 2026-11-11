@@ -322,8 +322,25 @@ func (a *app) login(w http.ResponseWriter, r *http.Request) error {
 		return apiError{401, "LOGIN_FAILED", "账号或密码错误，或账号已停用"}
 	}
 	t, c := token(), token()
-	_, e = a.db.Exec(r.Context(), "INSERT INTO sessions(token,user_id,auth_version,csrf,expires_at) VALUES($1,$2,$3,$4,$5)", digest(t), u.ID, ver, c, time.Now().Add(8*time.Hour))
+	tx, e := a.db.Begin(r.Context())
 	if e != nil {
+		return e
+	}
+	defer tx.Rollback(r.Context())
+	// Serialize with password resets/disabling. Session creation and its login
+	// statistic commit together; rejected or rolled-back logins never count.
+	result, e := tx.Exec(r.Context(), "UPDATE users SET login_count=login_count+1,last_login_at=clock_timestamp() WHERE id=$1 AND status='active' AND auth_version=$2", u.ID, ver)
+	if e != nil {
+		return e
+	}
+	if result.RowsAffected() != 1 {
+		return apiError{401, "LOGIN_FAILED", "账号或密码错误，或账号已停用"}
+	}
+	_, e = tx.Exec(r.Context(), "INSERT INTO sessions(token,user_id,auth_version,csrf,expires_at) VALUES($1,$2,$3,$4,$5)", digest(t), u.ID, ver, c, time.Now().Add(8*time.Hour))
+	if e != nil {
+		return e
+	}
+	if e = tx.Commit(r.Context()); e != nil {
 		return e
 	}
 	http.SetCookie(w, &http.Cookie{Name: a.sessionCookieName(), Value: t, Path: "/", HttpOnly: true, Secure: a.scheme == "https", SameSite: http.SameSiteLaxMode, MaxAge: 28800})

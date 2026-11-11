@@ -92,12 +92,13 @@ var shareJS string
 var shareTemplate = template.Must(template.New("share").Funcs(template.FuncMap{
 	"style":   func() template.CSS { return template.CSS(shareCSS) },
 	"script":  func() template.JS { return template.JS(shareJS) },
+	"favicon": func() template.URL { return template.URL(platformFaviconDataURL()) },
 	"ordinal": func(n int) string { return fmt.Sprintf("%02d", n+1) },
 }).Parse(shareHTML))
 
 func shareCSP() string {
 	hash := sha256.Sum256([]byte(shareJS))
-	return "default-src 'none'; style-src 'unsafe-inline'; script-src 'sha256-" + base64.StdEncoding.EncodeToString(hash[:]) + "'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+	return "default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'sha256-" + base64.StdEncoding.EncodeToString(hash[:]) + "'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 }
 
 func (a *app) publicSharePage(w http.ResponseWriter, r *http.Request) {

@@ -5,12 +5,18 @@ import {Brand,SignalMark} from './Identity';
 import {ModalFrame} from './ModalFrame';
 import {ResetPasswordModal} from './ResetPasswordModal';
 import {VersionHistory,type Activation} from './VersionHistory';
+import {RelativeTime} from './RelativeTime';
+import {LoginForm} from './LoginForm';
+import {LoginScene} from './LoginScene';
+import {ProjectWelcome,resetProjectWelcome} from './ProjectWelcome';
+import {MemberTable,type Member} from './MemberTable';
+import {ActionIcon} from './ActionIcon';
 import {InlineProjectName,type NameEditor} from './InlineProjectName';
 import {usePointerSurfaces} from './usePointerSurfaces';
 import {FileSelection} from './FileSelection';
 import {prepareArchive,type Selection,type UploadLimits} from './upload-input';
 
-type User = { id:string; username:string; role:string; status:string };
+type User = Member;
 type Deployment = {id:string; status:string; errorMessage?:string};
 type Project = {id:string; name:string; ownerId:string; status:string; url:string; currentReleaseId:string|null; currentVersionNumber:number|null; lastPublishedAt?:string; latestDeployment?:Deployment};
 type SharePage = {url:string; publishedCount:number};
@@ -28,7 +34,6 @@ async function api<T>(path:string, method='GET', data?:unknown,signal?:AbortSign
 }
 function upload(id:string,file:File,onProgress:(n:number)=>void,signal?:AbortSignal):Promise<void>{return new Promise((resolve,reject)=>{const xhr=new XMLHttpRequest();xhr.open('PUT',`/api/v1/deployments/${id}/archive`);xhr.setRequestHeader('Content-Type','application/zip');if(csrfToken)xhr.setRequestHeader('X-CSRF-Token',csrfToken);xhr.upload.onprogress=e=>{if(e.lengthComputable)onProgress(Math.round(e.loaded/e.total*100));};xhr.onload=()=>{if(xhr.status>=200&&xhr.status<300)resolve();else{let message='上传失败，请重试';try{message=JSON.parse(xhr.responseText).message||message;}catch{}reject(new Error(message));}};xhr.onerror=()=>reject(new Error('上传中断，请检查网络后重试。之前发布的内容仍可打开。'));xhr.timeout=600000;xhr.ontimeout=()=>reject(new Error('上传超时，请重试'));xhr.onabort=()=>reject(new Error('上传已结束'));signal?.addEventListener('abort',()=>xhr.abort(),{once:true});if(signal?.aborted){xhr.abort();reject(new Error('上传已结束'));return;}xhr.send(file);});}
 const size=(n?:number)=>n?`${Number((n/1000000).toFixed(1))} MB`:'正在读取限制';
-const time=(s?:string)=>s?new Date(s).toLocaleString('zh-CN'):'还没有发布';
 const exportInstructions = `请将当前原型导出为已编译完成、可直接在浏览器访问的静态网页。
 请提供包含首页 index.html 以及完整 JavaScript、CSS、图片、字体等资源的 dist 文件夹或全部编译产物，也可以提供 ZIP。发布平台会自动处理上传内容，无需用户自行打包。
 不要仅提供源代码、依赖目录或需要安装依赖、在线编译、运行后端才能访问的项目。
@@ -117,19 +122,10 @@ function App(){
  const navigationItems=[{id:'projects',label:'项目',ariaLabel:'项目列表',number:'01'},...(user?.role==='admin'?[{id:'users',label:'成员',ariaLabel:'成员管理',number:'02'}]:[])];
  if(loading)return <div className="loading"><SignalMark/><span>正在打开发布台</span></div>;
  if(!user)return <div className="login">
-  <section className="intro" data-pointer-surface="hero">
-   <div className="login-wordmark"><Brand/></div>
-   <div className="login-display"><span className="eyebrow">FROM YOUR DESK TO EVERYWHERE</span><h1><span>有想法？</span><span>放出来<span className="title-dot">。</span></span></h1></div>
-   <div className="intro-orbit" data-pointer-surface="orb" aria-hidden="true"><div className="orbit-ring"/><div className="orbit-core"><SignalMark/></div></div>
-  </section>
+  <LoginScene/>
   <main className="login-panel">
    <h2 className="login-heading">登录，<br/><em>开工。</em></h2>
-   {error&&<div role="alert" className="alert">{error}</div>}
-   <form className="login-form" onSubmit={e=>{e.preventDefault();const f=new FormData(e.currentTarget);action(async()=>{const result=await api<User & {user?:User}>('/auth/login','POST',{username:f.get('username'),password:f.get('password')});setUser(result.user||result);});}}>
-    <label className="input-line"><span>账号</span><input name="username" placeholder="你的账号" autoComplete="username" required autoFocus/></label>
-    <label className="input-line"><span>密码</span><input name="password" placeholder="输入密码" type="password" autoComplete="current-password" required/></label>
-    <button disabled={busy} data-pointer-surface="button" className="primary full" aria-label="登录"><span>{busy?'正在登录…':'进入发布台'}</span><span aria-hidden="true">↗</span></button>
-   </form>
+   <LoginForm error={error} onClearError={()=>setError('')} onLogin={async(username,password)=>{const result=await api<User & {user?:User}>('/auth/login','POST',{username,password});const account=result.user||result;resetProjectWelcome(account.id);setUser(account);}}/>
    <p className="login-subtitle">没有账号或忘记密码？联系Eugene</p>
   </main>
  </div>;
@@ -137,28 +133,26 @@ function App(){
   <aside className={'topbar'+(navigationItems.length===1?' single-navigation':'')}>
    <Brand/>
    {navigationItems.length>1&&<nav className="nav-tabs" aria-label="主导航">{navigationItems.map(item=><button key={item.id} className={pageTab===item.id?'selected':''} aria-label={item.ariaLabel} onClick={()=>{setTab(item.id);if(item.id==='users')action(async()=>setUsers((await api<{items:User[]}>('/admin/users')).items));}}><span className="nav-number" aria-hidden="true">{item.number}</span>{item.label}</button>)}</nav>}
-   <div className="account"><span className="avatar" aria-hidden="true">{user.username.slice(0,1).toUpperCase()}</span><div><strong className="account-name">{user.username}</strong><span className="account-role">{user.role==='admin'?'管理员':'团队成员'}</span></div><button className="logout" aria-label="退出登录" onClick={()=>action(async()=>{await api('/auth/logout','POST');setUser(null);setSelected(null);setTask(undefined);})}>退出 <span aria-hidden="true">↗</span></button></div>
+   <div className="account"><span className="avatar" aria-hidden="true">{user.username.slice(0,1).toUpperCase()}</span><div><strong className="account-name">{user.username}</strong><span className="account-role">{user.role==='admin'?'管理员':'团队成员'}</span></div><button className="logout" aria-label="退出登录" onClick={()=>action(async()=>{await api('/auth/logout','POST');setUser(null);setSelected(null);setTask(undefined);})}>退出<ActionIcon name="logout"/></button></div>
   </aside>
   <main className="workspace">
-   <header className="masthead" key={pageTab} data-pointer-surface="hero">
-    <div className="headline-block">{pageTab==='users'&&<span className="eyebrow">GOOD COMPANY / 02</span>}<h1 aria-label={pageTab==='projects'?'项目列表':'成员管理'}><span>{pageTab==='projects'?'原型':'一起'}</span><em>{pageTab==='projects'?'易分享':'创造'}<span className="title-dot">。</span></em></h1></div>
+   {pageTab==='projects'?<ProjectWelcome key={user.id} userId={user.id} count={projects.length} published={projects.filter(p=>p.lastPublishedAt).length} blocked={!!selected||showCreate||showShare||!!resetUser||busy||openingShare} openingShare={openingShare} onOpenShare={openOwnShare} onShare={()=>setShowShare(true)} onCreate={()=>setShowCreate(true)}/>:<header className="masthead" key={pageTab} data-pointer-surface="hero">
+    <div className="headline-block"><span className="eyebrow">GOOD COMPANY / 02</span><h1 aria-label="成员管理"><span>一起</span><em>创造<span className="title-dot">。</span></em></h1></div>
     <button type="button" className="hero-mark share-orb" data-pointer-surface="orb" onClick={openOwnShare} disabled={openingShare||busy} aria-label="查看我的全部原型" aria-busy={openingShare} title={openingShare?'正在打开分享页…':'查看我的全部原型'}><SignalMark/></button>
-    {pageTab==='projects'&&<div className="header-actions"><button className="share-all-button" onClick={()=>setShowShare(true)}>分享全部原型 <span aria-hidden="true">↗</span></button><button data-pointer-surface="button" className="primary create-button" onClick={()=>setShowCreate(true)}><span aria-hidden="true">＋</span> 创建项目</button></div>}
-   </header>
+   </header>}
    {error&&!selected&&<div className="alert" role="alert">{error}<button onClick={()=>setError('')} aria-label="关闭错误">×</button></div>}
    {notice&&!selected&&<div className="success toast" role="status"><span aria-hidden="true">✓</span>{notice}<button onClick={()=>setNotice('')} aria-label="关闭提示">×</button></div>}
-   {pageTab==='projects'?<>
-    <div className="summary"><span><strong>{String(projects.length).padStart(2,'0')}</strong><span>个原型</span></span><span><strong>{String(projects.filter(p=>p.lastPublishedAt).length).padStart(2,'0')}</strong><span>已发布</span></span></div>
+   {pageTab==='projects'?<div className="project-content">
     {!projects.length?<div className="empty"><span className="empty-number" aria-hidden="true">000</span><h2 className="empty-title">下一个好点子，<br/>从这里出发。</h2><button className="empty-create" aria-label="创建项目" onClick={()=>setShowCreate(true)}><span aria-hidden="true">＋</span><span>创建项目</span></button></div>:<div className="project-grid">{projects.map((p,index)=><article data-pointer-surface="card" className="project" key={p.id} style={{'--order':Math.min(index,8)} as React.CSSProperties}>
      <div className="project-top"><span className="project-number">{String(index+1).padStart(2,'0')}<span aria-hidden="true"> /</span></span><span className={'badge project-status '+(active(p.latestDeployment)?'processing':p.lastPublishedAt?'published':'unpublished')}>{active(p.latestDeployment)?'发布中':p.lastPublishedAt?'已发布':'未发布'}</span></div>
-     <div className="project-body"><h2 className="project-name" title={p.name}>{p.name}</h2><div className="timestamp">{p.lastPublishedAt?<><span>上次发布</span><strong>{time(p.lastPublishedAt)}</strong></>:<span>等待首次发布</span>}</div>{p.latestDeployment?.status==='FAILED'&&<p className="task-error">上次发布失败，{p.lastPublishedAt?'旧版仍可访问':'可重新上传'}</p>}</div>
+     <div className="project-body"><h2 className="project-name" title={p.name}>{p.name}</h2><div className="timestamp">{p.lastPublishedAt?<><span>上次发布</span><strong><RelativeTime value={p.lastPublishedAt}/></strong></>:<span>等待首次发布</span>}</div>{p.latestDeployment?.status==='FAILED'&&<p className="task-error">上次发布失败，{p.lastPublishedAt?'旧版仍可访问':'可重新上传'}</p>}</div>
      <div className="project-path" title={p.url}><span aria-hidden="true">↳</span><span>{new URL(p.url,window.location.origin).pathname}</span></div>
-     <footer><button className="project-manage" onClick={()=>open(p)}>{p.ownerId===user.id?p.lastPublishedAt?'发布更新':'首次发布':'查看详情'} <span aria-hidden="true">↗</span></button>{p.ownerId===user.id&&<button className="project-versions" onClick={()=>open(p,'versions')}>版本管理</button>}{p.lastPublishedAt&&<><button className="project-copy" onClick={()=>copy(p.url)}>复制链接</button><a className="project-open" href={p.url} target="_blank" rel="noopener noreferrer" aria-label={'打开原型：'+p.name}><span aria-hidden="true">↗</span></a></>}</footer>
-    </article>)}<button className="create-tile" onClick={()=>setShowCreate(true)}><span aria-hidden="true">＋</span><strong>下一个，轮到你。</strong><span>创建项目 ↗</span></button></div>}
+     <footer><button className="project-manage" onClick={()=>open(p)}>{p.ownerId===user.id?p.lastPublishedAt?'发布更新':'首次发布':'查看详情'}</button>{p.ownerId===user.id&&<button className="project-versions" onClick={()=>open(p,'versions')}>版本管理</button>}{p.lastPublishedAt&&<><button className="project-copy" onClick={()=>copy(p.url)}>复制链接</button><a className="project-open" href={p.url} target="_blank" rel="noopener noreferrer" aria-label={'打开原型：'+p.name}><ActionIcon name="external"/></a></>}</footer>
+    </article>)}<button className="create-tile" onClick={()=>setShowCreate(true)}><span aria-hidden="true">＋</span><strong>下一个，轮到你。</strong><span>创建项目</span></button></div>}
     <footer className="app-footer"><span aria-hidden="true">◈ GARAGE</span><span>持有链接即可查看，请勿上传敏感资料。</span></footer>
-   </>:<>
-    <section className="card member-create"><div className="section-heading"><span className="eyebrow">INVITE SOMETHING GREAT</span><h2>开通成员</h2></div><form className="inline-form" onSubmit={e=>{e.preventDefault();const el=e.currentTarget;const f=new FormData(el);action(async()=>{await api('/admin/users','POST',{username:f.get('username'),password:f.get('password')});setUsers((await api<{items:User[]}>('/admin/users')).items);el.reset();setNotice('成员账号已创建');});}}><label>账号<input name="username" placeholder="成员账号" required autoComplete="off"/></label><label>初始密码<input name="password" type="password" placeholder="至少6位，可纯数字" minLength={6} required autoComplete="new-password"/></label><button data-pointer-surface="button" className="primary" disabled={busy}>创建账号 <span aria-hidden="true">↗</span></button></form></section>
-    <section className="card member-list"><div className="section-heading"><h2>在场的人<span className="member-count">{String(users.length).padStart(2,'0')}</span></h2></div><div className="table-scroll"><table><thead><tr><th>账号</th><th>角色</th><th>状态</th><th>操作</th></tr></thead><tbody>{users.map(u=><tr key={u.id}><td><span className="table-avatar" aria-hidden="true">{u.username.slice(0,1).toUpperCase()}</span>{u.username}</td><td>{u.role==='admin'?'管理员':'成员'}</td><td><span className={'badge '+(u.status==='active'?'published':'')}>{u.status==='active'?'正常':'已停用'}</span></td><td>{u.id!==user.id&&u.role!=='admin'&&<><button disabled={busy} onClick={()=>action(async()=>{await api('/admin/users/'+u.id+'/status','PATCH',{status:u.status==='active'?'disabled':'active'});setUsers((await api<{items:User[]}>('/admin/users')).items);})}>{u.status==='active'?'停用':'启用'}</button><button disabled={busy} onClick={()=>{setError('');setResetUser(u);}}>重置密码</button></>}</td></tr>)}</tbody></table></div></section>
+   </div>:<>
+    <section className="card member-create"><div className="section-heading"><span className="eyebrow">INVITE SOMETHING GREAT</span><h2>开通成员</h2></div><form className="inline-form" onSubmit={e=>{e.preventDefault();const el=e.currentTarget;const f=new FormData(el);action(async()=>{await api('/admin/users','POST',{username:f.get('username'),password:f.get('password')});setUsers((await api<{items:User[]}>('/admin/users')).items);el.reset();setNotice('成员账号已创建');});}}><label>账号<input name="username" placeholder="成员账号" required autoComplete="off"/></label><label>初始密码<input name="password" type="password" placeholder="至少6位，可纯数字" minLength={6} required autoComplete="new-password"/></label><button data-pointer-surface="button" className="primary" disabled={busy}>创建账号</button></form></section>
+    <MemberTable users={users} currentUserId={user.id} busy={busy} onRefresh={()=>action(async()=>setUsers((await api<{items:User[]}>('/admin/users')).items))} onToggle={u=>action(async()=>{await api('/admin/users/'+u.id+'/status','PATCH',{status:u.status==='active'?'disabled':'active'});setUsers((await api<{items:User[]}>('/admin/users')).items);})} onReset={u=>{setError('');setResetUser(u);}}/>
    </>}
   </main>
   {showShare&&<ShareAllModal key={user.id} isAdmin={user.role==='admin'} onClose={()=>setShowShare(false)}/>}
@@ -169,7 +163,7 @@ function App(){
     <div className="success-mark" aria-hidden="true">✓</div><h2>更新成功</h2>
     <p>{selected.name} 已更新，原分享链接可查看新版。</p>
     {error&&<div className="alert" role="alert">{error}</div>}{notice&&<div className="success" role="status">{notice}</div>}
-    <div className="share-actions"><a href={selected.url} target="_blank" rel="noopener noreferrer">查看原型 ↗</a><button className="primary" onClick={()=>copy(selected.url)}>复制链接</button><button disabled={busy} onClick={()=>{setSelected(null);setTask(undefined);setUpdateSuccess(null);}}>完成</button></div>
+    <div className="share-actions"><a href={selected.url} target="_blank" rel="noopener noreferrer">查看原型<ActionIcon name="external"/></a><button className="primary" onClick={()=>copy(selected.url)}>复制链接</button><button disabled={busy} onClick={()=>{setSelected(null);setTask(undefined);setUpdateSuccess(null);}}>完成</button></div>
    </>:<>
    <InlineProjectName key={selected.id} ref={nameEditor} name={selected.name} editable={selected.ownerId===user.id} disabled={busy||active(task)||selectionBusy||deleting||versionSwitching} onSave={async(name,signal)=>{const saved=await api<Project>('/projects/'+selected.id,'PATCH',{name},signal);if(signal.aborted)return;setSelected(current=>current?.id===selected.id?{...current,name:saved.name}:current);setProjects(items=>items.map(item=>item.id===selected.id?{...item,name:saved.name}:item));}}/>
    {error&&<div role="alert" className="alert">{error}</div>}{notice&&<div className="success" role="status">{notice}</div>}
@@ -179,7 +173,7 @@ function App(){
     {prepareStage&&<p role="status" className="task-state">{prepareStage}</p>}
     {progress!==null&&<><progress value={progress} max={100}/><p className="small" role="status">正在上传 {progress}%</p></>}
     {task&&task.status!=='SUCCEEDED'&&<div className={task.status==='FAILED'?'alert':'task-state'} role="status">{task.status==='FAILED'?'上次上传失败':labels[task.status.toUpperCase()]||'正在发布'}{task.errorMessage&&<p>{task.errorMessage}</p>}{task.status==='FAILED'&&selected.lastPublishedAt&&<p>旧版仍可访问。</p>}</div>}
-    <button data-pointer-surface="button" className="primary full" disabled={!selection||busy||active(task)||selectionBusy||deleting||versionSwitching}><span>{busy?'正在上传…':active(task)?'正在发布…':selected.lastPublishedAt?'发布更新':'上传并发布'}</span><span aria-hidden="true">↗</span></button>
+    <button data-pointer-surface="button" className="primary full" disabled={!selection||busy||active(task)||selectionBusy||deleting||versionSwitching}><span>{busy?'正在上传…':active(task)?'正在发布…':selected.lastPublishedAt?'发布更新':'上传并发布'}</span><ActionIcon name="upload"/></button>
    </form><div className="delete-project">{confirmDelete?<div className="delete-confirm" role="group" aria-label="确认删除项目"><strong>确定删除这个项目？</strong><p>无法恢复，原分享链接将失效。</p><div className="share-actions"><button disabled={deleting} onClick={()=>setConfirmDelete(false)}>取消</button><button className="danger" disabled={busy||active(task)||selectionBusy||deleting||versionSwitching} onClick={removeProject}>{deleting?'正在删除…':'确认删除'}</button></div></div>:<button className="delete-entry" disabled={busy||active(task)||selectionBusy||deleting||versionSwitching} onClick={()=>{setError('');setConfirmDelete(true);}}>删除项目</button>}</div></>}
    </>}
   </ModalFrame>}
@@ -276,12 +270,12 @@ function CreateProjectModal({config,onClose,onChange}:{config:Config;onClose:()=
   catch{if(mounted.current)setError(errorMessage);}
  }
  return <ModalFrame className={'wide create-modal'+(success?' is-success':'')} labelledBy="create-project-title" locked={busy} onClose={close} closeLabel="关闭创建项目弹窗">
-  {success&&<div className="success-mark" aria-hidden="true">↗</div>}
+  {success&&<div className="success-mark" aria-hidden="true"><ActionIcon name="check"/></div>}
   <h2 id="create-project-title">{success?'发布成功。':'创建项目'}</h2>
   {error&&<div className="alert" role="alert">{error}</div>}{notice&&<div className="success" role="status">{notice}</div>}
   {success&&project?<>
    <label>分享链接<input readOnly value={project.url} onFocus={e=>e.currentTarget.select()}/></label>
-   <div className="share-actions"><button data-pointer-surface="button" className="primary" onClick={()=>copyText(project.url)}>复制链接 <span aria-hidden="true">↗</span></button><a href={project.url} target="_blank" rel="noopener noreferrer">打开原型 ↗</a><button onClick={close}>完成</button></div>
+   <div className="share-actions"><button data-pointer-surface="button" className="primary" onClick={()=>copyText(project.url)}>复制链接</button><a href={project.url} target="_blank" rel="noopener noreferrer">打开原型<ActionIcon name="external"/></a><button onClick={close}>完成</button></div>
   </>:<form onSubmit={submit}>
    <label>项目名称<input value={name} onChange={e=>setName(e.target.value)} required maxLength={100} disabled={busy} placeholder="给这个想法起个名字"/></label>
    <FileSelection value={selection} onChange={setSelection} disabled={requestBusy||active(task)} limits={config} onBusyChange={setSelectionBusy}/>
@@ -290,7 +284,7 @@ function CreateProjectModal({config,onClose,onChange}:{config:Config;onClose:()=
    {progress!==null&&<><progress value={progress} max={100}/><p role="status" className="small">正在上传 {progress}%</p></>}
    {active(task)&&<p className="task-state" role="status">{labels[task!.status]||'正在发布'}…</p>}
    {project&&!busy&&<p className="small muted">项目已保留，可直接重试。</p>}
-   <button data-pointer-surface="button" className="primary full" disabled={busy||!selection||!config.maxUploadBytes}><span>{busy?'正在发布…':project?'重试发布':'创建并发布'}</span><span aria-hidden="true">↗</span></button>
+   <button data-pointer-surface="button" className="primary full" disabled={busy||!selection||!config.maxUploadBytes}><span>{busy?'正在发布…':project?'重试发布':'创建并发布'}</span><ActionIcon name="upload"/></button>
   </form>}
  </ModalFrame>;
 }
@@ -310,7 +304,7 @@ function ShareAllModal({isAdmin,onClose}:{isAdmin:boolean;onClose:()=>void}){
   catch{setError('复制失败，请选中下方链接后手动复制');}
  }
  return <ModalFrame className="share-modal" labelledBy="share-all-title" onClose={onClose} closeLabel="关闭分享全部原型弹窗">
-  <span className="modal-index">ONE LINK / ALL IDEAS</span><h2 id="share-all-title">分享全部原型</h2>
+  <h2 id="share-all-title">分享全部原型</h2>
   {isAdmin&&<p className="small muted">仅包含你自己的项目。</p>}
   {loading&&<p role="status" className="task-state">正在获取链接…</p>}
   {error&&<div className="alert" role="alert">{error}</div>}{notice&&<div className="success" role="status">{notice}</div>}
@@ -318,7 +312,7 @@ function ShareAllModal({isAdmin,onClose}:{isAdmin:boolean;onClose:()=>void}){
    <div className="share-total"><strong>{String(page.publishedCount).padStart(2,'0')}</strong><span>个已发布原型</span></div>
    {page.publishedCount===0&&<p className="small muted">发布后会自动加入这个分享页。</p>}
    <label>固定分享链接<input aria-label="全部原型分享链接" readOnly value={page.url} onFocus={e=>e.currentTarget.select()}/></label>
-   <div className="share-actions"><button data-pointer-surface="button" className="primary" onClick={copyShare}>复制链接 <span aria-hidden="true">↗</span></button><a href={page.url} target="_blank" rel="noopener noreferrer">打开分享页 ↗</a></div>
+   <div className="share-actions"><button data-pointer-surface="button" className="primary" onClick={copyShare}>复制链接</button><a href={page.url} target="_blank" rel="noopener noreferrer">打开分享页<ActionIcon name="external"/></a></div>
   </>}
   {!loading&&!page&&<button data-pointer-surface="button" className="primary" onClick={()=>setAttempt(n=>n+1)}>重试</button>}
  </ModalFrame>;

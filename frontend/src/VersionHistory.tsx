@@ -1,4 +1,5 @@
 import {useEffect,useRef,useState} from 'react';
+import {RelativeTime} from './RelativeTime';
 import './versions.css';
 
 type Api=<T>(route:string,method?:string,body?:unknown,signal?:AbortSignal)=>Promise<T>;
@@ -7,7 +8,6 @@ type Versions={items:Version[];currentReleaseId:string|null;busy:boolean;cleanup
 type RecordItem={id:string;status:string;errorMessage:string;createdAt:string;updatedAt:string;releaseId:string|null;versionNumber:number|null;filesState:'available'|'cleanup_pending'|'cleaned'|'missing'|null;isCurrent:boolean};
 type Records={items:RecordItem[];nextCursor:string|null};
 export type Activation={ok:true;currentReleaseId:string;currentVersionNumber:number;lastPublishedAt:string};
-const when=(value:string)=>new Date(value).toLocaleString('zh-CN');
 const statusNames:Record<string,string>={UPLOADING:'上传中',QUEUED:'等待处理',VALIDATING:'检查文件中',PREPARING:'发布中',SUCCEEDED:'发布成功',FAILED:'发布失败'};
 const fileNames:Record<string,string>={available:'文件可用',cleanup_pending:'等待清理',cleaned:'文件已清理',missing:'文件缺失'};
 
@@ -111,7 +111,7 @@ export function VersionHistory({projectId,revision,disabled,api,onBusyChange,onA
    {versions?.cleanupPending&&<p className="small muted">较早版本的文件正在清理，记录仍会保留。</p>}
    {versions&&!versions.items.length&&<p className="version-empty">还没有成功发布的版本。</p>}
    <ol className="version-list">{versions?.items.map(item=><li key={item.id} className={'version-item'+(item.isCurrent?' is-current':'')}>
-    <div className="version-meta"><strong>v{item.versionNumber}</strong>{item.isCurrent&&<span className="version-current">当前版本</span>}<time dateTime={item.createdAt}>{when(item.createdAt)}</time>{item.filesState==='missing'&&<span className="version-unavailable">文件缺失，无法切换</span>}</div>
+    <div className="version-meta"><strong>v{item.versionNumber}</strong>{item.isCurrent&&<span className="version-current">当前版本</span>}<RelativeTime value={item.createdAt}/>{item.filesState==='missing'&&<span className="version-unavailable">文件缺失，无法切换</span>}</div>
     {!item.isCurrent&&<button type="button" disabled={locked||loading||!item.canActivate||item.filesState!=='available'} onClick={()=>{setConfirm(item);setError('');}}>切换到 v{item.versionNumber}</button>}
    </li>)}</ol>
    {confirm&&<div role="group" aria-label="确认切换版本" className="version-confirm">
@@ -123,7 +123,7 @@ export function VersionHistory({projectId,revision,disabled,api,onBusyChange,onA
    {!loading&&!records.length&&<p className="version-empty">暂无发布记录。</p>}
    <ol className="version-log">{records.map(item=><li key={item.id}>
     <div className="version-log-top"><strong>{item.versionNumber!==null?'v'+item.versionNumber:'发布任务'}</strong><span className={item.status==='FAILED'?'version-failed':''}>{statusNames[item.status]||item.status}</span>{item.isCurrent&&<span className="version-current">当前版本</span>}</div>
-    <time dateTime={item.createdAt}>{when(item.createdAt)}</time>{item.filesState&&item.filesState!=='available'&&<span className="version-files">{fileNames[item.filesState]}</span>}
+    <RelativeTime value={item.createdAt}/>{item.filesState&&item.filesState!=='available'&&<span className="version-files">{fileNames[item.filesState]}</span>}
     {item.errorMessage&&<p className="version-log-error">{item.errorMessage}</p>}
    </li>)}</ol>
    {cursor&&<button type="button" className="version-more" disabled={loading||moreLoading||switching} onClick={more}>{moreLoading?'正在读取…':'加载更多记录'}</button>}

@@ -6,6 +6,7 @@
   <meta name="theme-color" content="#f3f0e9">
   <meta name="color-scheme" content="light">
   <title>原型合集 · GARAGE</title>
+  <link rel="icon" type="image/svg+xml" href="{{favicon}}">
   <style>{{style}}</style>
 </head>
 <body>
@@ -25,7 +26,7 @@
             <div class="card-top"><span class="card-index" aria-hidden="true">{{ordinal $index}} /</span><span class="published"><span aria-hidden="true">✓</span> 已发布</span></div>
             <div class="card-title"><h2 id="project-{{$index}}">{{.Name}}</h2>{{if .Published}}<p class="date">最近发布 <time>{{.Published}}</time></p>{{end}}</div>
             <div class="card-art" aria-hidden="true"><div class="art-sheet sheet-back"></div><div class="art-sheet sheet-front"><span></span><span></span><i></i></div></div>
-            <div class="card-bottom"><span id="project-open-{{$index}}" class="open-label">打开原型 <span aria-hidden="true">↗</span></span><span class="open-arrow" aria-hidden="true">↗</span></div>
+            <div class="card-bottom"><span id="project-open-{{$index}}" class="open-label">打开原型</span><span class="open-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10 4H5a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-5M14 4h6v6m0-6L10 14"/></svg></span></div>
           </a>
         </article>
         {{end}}

@@ -31,9 +31,12 @@ async function openCreate(){await page.getByRole('button',{name:/创建项目/})
 async function publicVersion(version){const u=localURL(publicURL);assert.equal(u.origin,PUBLIC,'Project must be served on local public host');const p=await context.newPage();try{const response=await p.goto(u.href);assert.equal(response.status(),200);await p.getByRole('heading',{name:'Local UI '+version,exact:true}).waitFor();assert.equal(await p.locator('#version').textContent(),version);}finally{await p.close();}}
 async function orbSharePreview(keyboard=false){
  const orb=page.getByRole('button',{name:'查看我的全部原型',exact:true});
- await until(()=>orb.isEnabled(),'Share orb did not become ready');
+ const hasOrb=await orb.count()>0;
+ let entry=orb;
+ if(hasOrb)await until(()=>orb.isEnabled(),'Share orb did not become ready');
+ else{await page.getByRole('button',{name:/分享全部原型/}).click();entry=page.getByRole('link',{name:/打开分享页/});await entry.waitFor();}
  const popup=page.waitForEvent('popup');
- if(keyboard){await page.bringToFront();await orb.focus();await page.keyboard.press('Enter');}else await orb.click();
+ if(keyboard){await page.bringToFront();await entry.focus();await page.keyboard.press('Enter');}else await entry.click();
  const preview=await popup;
  try{
   await preview.waitForURL(u=>u.origin===PUBLIC&&u.pathname.startsWith('/_share/'));
@@ -45,10 +48,14 @@ async function orbSharePreview(keyboard=false){
   const actual=await preview.locator('article a').evaluateAll(nodes=>nodes.map(a=>a.href).sort());
   assert.deepEqual(actual,expected,'Share orb must include only this account’s published projects');
  }finally{await preview.close();}
- await page.bringToFront();step(keyboard?'share orb keyboard opens own collection in a new tab':'share orb click directly opens own collection, excludes drafts and other owners');
+ await page.bringToFront();if(!hasOrb){await page.keyboard.press('Escape');await waitNoDialog();}step(keyboard?'keyboard opens own collection from the available sharing entry':'available sharing entry opens own collection, excludes drafts and other owners');
 }
 async function orbShareFailure(){
  await page.route(ADMIN+'/api/v1/share-page',route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({message:'暂时无法打开分享页，请重试'})}),{times:1});
+ if(!await page.getByRole('button',{name:'查看我的全部原型',exact:true}).count()){
+  await page.getByRole('button',{name:/分享全部原型/}).click();await page.getByRole('alert').filter({hasText:'暂时无法打开分享页，请重试'}).waitFor();
+  await page.getByRole('button',{name:'重试',exact:true}).click();await page.getByRole('link',{name:/打开分享页/}).waitFor();await page.keyboard.press('Escape');await waitNoDialog();step('compact sharing entry reports failure and supports retry');return;
+ }
  const popup=page.waitForEvent('popup');await page.getByRole('button',{name:'查看我的全部原型',exact:true}).click();const preview=await popup;
  await page.getByRole('alert').filter({hasText:'暂时无法打开分享页，请重试'}).waitFor();
  if(!preview.isClosed())await preview.waitForEvent('close');
@@ -69,7 +76,7 @@ async function pointerInteractions(article){
  const card=article; // The article itself is the pointer surface.
  assert.ok(await card.evaluate(el=>el.hasAttribute('data-pointer-surface')),'Card pointer marker missing');
  const first=await pointAt(card,.22,.26);await until(async()=>(await pointerState(card)).active==='true','Card never activated from real mouse movement');const second=await pointAt(card,.76,.68);assert.ok(first.x!==second.x||first.y!==second.y,'Pointer coordinates did not react to mouse position');assert.ok(first.tiltX!==second.tiltX||first.tiltY!==second.tiltY||first.transform!==second.transform,'Card tilt did not react to mouse position');await blankPointer();await pointerReset(card,'Card leave');
- const orb=page.locator('.hero-mark');const orbLeft=await pointAt(orb,.24,.28),orbRight=await pointAt(orb,.72,.65);assert.ok(orbLeft.x!==orbRight.x&&orbLeft.tiltY!==orbRight.tiltY,'Glass orb did not respond to real pointer movement');await blankPointer();await pointerReset(orb,'Glass orb leave');
+ const orb=page.locator('.hero-mark');let orbLeft=null,orbRight=null;if(await orb.count()){orbLeft=await pointAt(orb,.24,.28);orbRight=await pointAt(orb,.72,.65);assert.ok(orbLeft.x!==orbRight.x&&orbLeft.tiltY!==orbRight.tiltY,'Glass orb did not respond to real pointer movement');await blankPointer();await pointerReset(orb,'Glass orb leave');}
  const primary=page.locator('.header-actions .primary').first();assert.ok(await primary.evaluate(el=>el.hasAttribute('data-pointer-surface')),'Primary pointer marker missing');const left=await pointAt(primary,.2,.3),right=await pointAt(primary,.8,.7);assert.ok(left.driftX!==right.driftX||left.driftY!==right.driftY,'Primary magnetic movement did not react');await blankPointer();await pointerReset(primary,'Primary leave');
  await pointAt(primary,.8,.7);await page.evaluate(()=>window.dispatchEvent(new Event('blur')));await pointerReset(primary,'Window blur');await pointAt(card,.7,.6);await page.emulateMedia({reducedMotion:'reduce'});await pointerReset(card,'Reduced-motion change');await pointAt(card,.2,.3);assert.notEqual((await pointerState(card)).active,'true','Reduced-motion activated mouse animation');
  report.pointer={cardFirst:first,cardSecond:second,orbLeft,orbRight,primaryLeft:left,primaryRight:right};step('real mouse card tilt, glass orb, primary magnetic movement, leave/blur resets and reduced-motion opt-out');

@@ -112,6 +112,11 @@ async function renderVersion(page,url,version){
   assert.equal(await page.locator('#version').evaluate(element=>getComputedStyle(element).color),'rgb(18, 103, 124)');
   assert.equal(failures.length,0,'Published JS/CSS request failed.');
   assert.equal(errors.length,0,'Published page raised a JavaScript error.');
+  const icon=await page.locator('link[rel="icon"]').getAttribute('href');
+  assert.ok(icon,'Static prototype without its own icon must receive the platform icon.');
+  const iconURL=new URL(icon,url);assert.equal(iconURL.origin,origin);
+  const iconResponse=await fetch(iconURL,{signal:AbortSignal.timeout(15000)});
+  assert.equal(iconResponse.status,200);assert.match(iconResponse.headers.get('content-type'),/image\/svg\+xml/);
  }finally{page.off('pageerror',onError);page.off('response',onResponse);}
 }
 
@@ -129,11 +134,24 @@ try{
  const {data:initial}=await api('/projects');
  initialProjects=projectSnapshot(initial.items);
  const {data:initialAccounts}=await api('/admin/users');initialUsers=userSnapshot(initialAccounts.items);
+ const initialMetrics=initialAccounts.items.find(user=>user.id===ownerId);
+ assert.ok(initialAccounts.storageMeasuredAt&&initialMetrics&&typeof initialMetrics.storageBytes==='number');
+ assert.ok(initialMetrics.loginCount>=1&&initialMetrics.lastLoginAt&&initialMetrics.loginStatsSince);
  const ownPublishedCount=initial.items.filter(p=>p.ownerId===ownerId&&p.currentReleaseId).length;
  pass('existing accounts and project identity/current-release fields snapshotted without modification');
 
  browser=await chromium.launch({channel:'chrome',headless:true});
  context=await browser.newContext({viewport:{width:1440,height:1000},ignoreHTTPSErrors:false});
+ const loginContext=await browser.newContext({viewport:{width:1156,height:1004},ignoreHTTPSErrors:false});
+ try{
+  const loginPage=await loginContext.newPage();await loginPage.goto(origin+'/',{waitUntil:'networkidle'});
+  await loginPage.getByRole('button',{name:'显示密码',exact:true}).waitFor();
+  assert.equal(await loginPage.locator('.scene-letter').count(),8);
+  const password=loginPage.locator('[name="password"]');await password.fill('visual-check');
+  await loginPage.getByRole('button',{name:'显示密码',exact:true}).click();assert.equal(await password.getAttribute('type'),'text');
+  await loginPage.getByRole('button',{name:'隐藏密码',exact:true}).click();assert.equal(await password.getAttribute('type'),'password');
+ }finally{await loginContext.close();}
+ pass('HTTPS login form includes refined fields, password reveal and interactive scene');
  const delimiter=cookie.indexOf('=');
  await context.addCookies([{name:cookie.slice(0,delimiter),value:cookie.slice(delimiter+1),url:origin,httpOnly:true,secure:true,sameSite:'Lax'}]);
  const preview=await context.newPage();
@@ -141,6 +159,8 @@ try{
  assert.equal(project.ownerId,ownerId,'Temporary project ownership mismatch.');
  const fixedURL=checkedPublicURL(project.url);
  await publish(archive('v1'),'SUCCEEDED');await renderVersion(preview,fixedURL,'v1');
+ const firstUsage=(await api('/admin/users')).data.items.find(user=>user.id===ownerId);
+ assert.ok(firstUsage.storageBytes>initialMetrics.storageBytes,'Published files must contribute to owner usage.');
  const {data:first}=await api('/projects/'+project.id);assert.equal(first.currentVersionNumber,1);assert.ok(first.currentReleaseId);
  pass('real ZIP published, HTML/JS rendered v1 and CSS applied in Chrome');
  await publish(archive('v2'),'SUCCEEDED');
@@ -148,6 +168,9 @@ try{
  assert.equal(updated.url,fixedURL,'Updating must preserve the public URL.');
  assert.equal(updated.currentVersionNumber,2);assert.ok(updated.currentReleaseId&&updated.currentReleaseId!==first.currentReleaseId);
  await renderVersion(preview,fixedURL,'v2');
+ const secondUsage=(await api('/admin/users')).data.items.find(user=>user.id===ownerId);
+ assert.ok(secondUsage.storageBytes>firstUsage.storageBytes,'Retained v1 and v2 must both contribute to owner usage.');
+ assert.equal(secondUsage.loginCount,initialMetrics.loginCount,'Publishing/session reads are not new logins.');
  pass('same public URL renders v2 after update');
  const {data:versions}=await api('/projects/'+project.id+'/versions');
  assert.equal(versions.retentionLimit,5);assert.deepEqual(versions.items.map(v=>v.versionNumber),[2,1]);
@@ -162,7 +185,18 @@ try{
  pass('independent version APIs retain two versions; rollback v1 and return v2 preserve URL and upload history');
  const versionPage=await context.newPage();await versionPage.goto(origin+'/',{waitUntil:'networkidle'});
  await versionPage.getByRole('heading',{name:'项目列表',exact:true}).waitFor();
+ assert.equal(await versionPage.locator('.logout [data-icon="logout"]').count(),1);
+ assert.equal(await versionPage.locator('.share-all-button [data-icon="share"]').count(),1);
+ assert.equal(await versionPage.locator('.project-content').count(),1);
+ await versionPage.waitForFunction(()=>['collapsing','compact'].includes(document.querySelector('.project-masthead')?.getAttribute('data-welcome-state')));
+ const animatedHeights=await versionPage.evaluate(()=>document.getAnimations().filter(animation=>animation.effect?.getKeyframes().some(frame=>Object.hasOwn(frame,'height'))).length);
+ assert.equal(animatedHeights,0,'Exit must not animate height and re-layout the list each frame.');
+ await versionPage.waitForFunction(()=>document.querySelector('.project-masthead')?.getAttribute('data-welcome-state')==='compact');
+ await versionPage.reload({waitUntil:'networkidle'});
+ assert.equal(await versionPage.locator('.project-masthead').getAttribute('data-welcome-state'),'compact','Refresh must not replay the opening.');
  const tempCard=versionPage.locator('article.project').filter({has:versionPage.getByRole('heading',{name:testName,exact:true})});
+ assert.equal(await tempCard.locator('.project-open [data-icon="external"]').count(),1);
+ assert.match(await tempCard.locator('.timestamp time').getAttribute('title'),/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
  await tempCard.getByRole('button',{name:'版本管理',exact:true}).click();
  const versionDialog=versionPage.getByRole('dialog',{name:'版本管理',exact:true});await versionDialog.waitFor();
  await versionDialog.getByTestId('version-history').waitFor();
@@ -170,8 +204,16 @@ try{
  await versionDialog.getByText('当前版本 v2',{exact:true}).waitFor();
  await versionDialog.getByRole('button',{name:'切换到 v1',exact:true}).waitFor();
  assert.equal(await versionDialog.locator('input[type="file"]').count(),0,'Version management must be separate from uploading.');
+ const close=versionDialog.locator('button.close');assert.equal(await close.locator('svg path').count(),1);
+ assert.equal(await close.evaluate(element=>getComputedStyle(element).width),'48px');
+ await close.click();await versionDialog.waitFor({state:'hidden'});
+ await tempCard.getByRole('button',{name:'发布更新',exact:true}).click();
+ const uploadDialog=versionPage.getByRole('dialog');await uploadDialog.waitFor();
+ assert.equal(await uploadDialog.locator('button.primary.full [data-icon="upload"]').count(),1);
+ await uploadDialog.locator('button.close').click();await uploadDialog.waitFor({state:'hidden'});
  await versionPage.close();
  pass('new project-list UI opens independent version management with current version and switch target');
+ pass('semantic operation icons, SVG close control and compositor-only exit animation verified on HTTPS');
  await publish(strToU8('invalid zip production smoke'),'FAILED');
  await renderVersion(preview,fixedURL,'v2');
  assert.equal((await api('/projects/'+project.id)).data.currentReleaseId,updated.currentReleaseId);
@@ -181,9 +223,12 @@ try{
  assert.equal(share.publishedCount,ownPublishedCount+1);
  const shareURL=checkedPublicURL(share.url);
  await preview.goto(shareURL,{waitUntil:'domcontentloaded'});
+ assert.match(await preview.locator('link[rel="icon"]').getAttribute('href'),/^data:image\/svg\+xml;base64,/);
  await preview.getByRole('heading',{name:testName,exact:true}).waitFor();
  const sharedLink=preview.locator('article').filter({has:preview.getByRole('heading',{name:testName,exact:true})}).getByRole('link');
  assert.equal(await sharedLink.getAttribute('href'),fixedURL);
+ assert.equal(await sharedLink.locator('.open-arrow svg').count(),1);
+ assert.equal(await sharedLink.locator('.open-label').innerText(),'打开原型');
  pass('public share page includes the published project');
  await removeOwnTestProject();
  const gone=await fetch(fixedURL,{redirect:'error',signal:AbortSignal.timeout(30000)});
@@ -197,9 +242,15 @@ try{
  const consolePage=await context.newPage();await consolePage.goto(origin+'/',{waitUntil:'networkidle'});
  await consolePage.getByRole('heading',{name:'项目列表',exact:true}).waitFor();
  assert.equal(await consolePage.locator('article.project').count(),initialProjects.length);
+ await consolePage.getByRole('button',{name:'成员管理',exact:true}).click();
+ await consolePage.locator('.members-table tbody tr').last().waitFor();
+ for(const name of ['占用空间','登录次数','最近登录'])assert.equal(await consolePage.getByRole('columnheader',{name,exact:true}).count(),1);
+ await consolePage.screenshot({path:path.join(workspace,'.local/garage-members-online.png'),fullPage:true});
+ await consolePage.getByRole('button',{name:'项目列表',exact:true}).click();
  mkdirSync(path.join(workspace,'.local'),{recursive:true});
  await consolePage.screenshot({path:path.join(workspace,'.local/garage-online.png'),fullPage:true});
  pass('existing account/project snapshots unchanged; final HTTPS project list screenshot saved');
+ pass('member storage/login statistics, relative-time tooltip, one-time opening and prototype/collection icons verified online');
 }catch(error){failure=error;}
 finally{
  try{await removeOwnTestProject();}catch{console.error('Cleanup could not be confirmed for this run’s temporary project only. No existing project was deleted.');failure ||= new Error('Temporary project cleanup requires inspection.');}

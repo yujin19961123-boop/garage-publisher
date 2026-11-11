@@ -1,0 +1,25 @@
+/* At rest the original composition is untouched. Light and game feedback only
+   appear for a mouse, and never for reduced-motion or touch navigation. */
+.login-scene .login-wordmark { position: relative; z-index: 2; }
+.login-scene .login-display h1 > span > span { display: block; }
+.scene-letter-anchor, .scene-letter { display: inline-block; }
+.scene-letter { transform-origin: 50% 70%; color: color-mix(in srgb, currentColor, #92aa94 calc(var(--letter-charge,0) * 38%)); }
+.scene-orbit-motion { position: absolute; inset: 0; }
+.scene-orbit-motion .orbit-ring { transform: rotate(calc(-25deg + var(--orbit-turn,0deg))) scaleY(.43); }
+.scene-light, .scene-effects { position: absolute; inset: 0; pointer-events: none; }
+.scene-light { z-index: 0; opacity: 0; background: radial-gradient(circle 240px at var(--scene-x,50%) var(--scene-y,50%),#fffef956,transparent 80%); transition: opacity 450ms; }
+.scene-effects { z-index: 3; overflow: hidden; }
+.scene-cursor { position: absolute; left: 0; top: 0; width: 36px; height: 36px; margin: -18px 0 0 -18px; border: 1px solid #fffef9a0; border-radius: 50%; opacity: 0; box-shadow: 0 0 16px #fffef91c; transition: opacity 180ms; }
+.scene-cursor i { position: absolute; inset: 15px; border-radius: 50%; background: #fffef9b0; }
+.scene-ripple { position: absolute; width: 220px; height: 220px; border: 1px solid #fffef9b3; border-radius: 50%; opacity: 0; background: radial-gradient(circle,transparent 55%,#fffef916 70%,transparent 72%); }
+.scene-spark { position: absolute; width: 5px; height: 5px; border: 1px solid #fffef9b0; background: #eff4e680; border-radius: 1px; opacity: 0; }
+@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+  .login-scene[data-scene-active] { cursor: crosshair; }
+  .login-scene[data-scene-active] .scene-light, .login-scene[data-scene-active] .scene-cursor { opacity: 1; }
+  .login-scene[data-scene-active] .scene-letter, .login-scene[data-scene-active] .scene-orbit-motion { will-change: transform; }
+  .login-scene[data-scene-active] .orbit-core { background: radial-gradient(circle at var(--orb-light-x,50%) 24%,#fffef9dd,transparent 60%),linear-gradient(135deg,#e1ebdc9e,#b2b7c65e); }
+}
+@media (hover: none), (pointer: coarse), (prefers-reduced-motion: reduce) {
+  .scene-light, .scene-effects { display: none; }
+  .scene-letter, .scene-orbit-motion { transform: none !important; }
+}

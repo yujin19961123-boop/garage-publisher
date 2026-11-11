@@ -16,6 +16,6 @@ export function ResetPasswordModal({username,onSave,onClose}:{username:string;on
   <span className="modal-index">MEMBER / ACCESS</span><h2 id="reset-password-title">重置密码</h2>
   <p className="muted">账号：{username}</p>
   {error&&<div className="alert" role="alert">{error}</div>}
-  <form onSubmit={submit}><label>新密码<input type="password" name="password" value={password} onChange={e=>setPassword(e.target.value)} minLength={6} required disabled={busy} placeholder="至少6位，可纯数字" autoComplete="new-password"/></label><p className="small muted">重置后，该成员需要重新登录。</p><button data-pointer-surface="button" className="primary full" disabled={busy}><span>{busy?'正在重置…':'重置密码'}</span><span aria-hidden="true">↗</span></button></form>
+  <form onSubmit={submit}><label>新密码<input type="password" name="password" value={password} onChange={e=>setPassword(e.target.value)} minLength={6} required disabled={busy} placeholder="至少6位，可纯数字" autoComplete="new-password"/></label><p className="small muted">重置后，该成员需要重新登录。</p><button data-pointer-surface="button" className="primary full" disabled={busy}><span>{busy?'正在重置…':'重置密码'}</span></button></form>
  </ModalFrame>;
 }

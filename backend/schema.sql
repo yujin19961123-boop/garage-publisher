@@ -32,3 +32,14 @@ CREATE TABLE IF NOT EXISTS version_cleanup_jobs(
  attempts integer NOT NULL DEFAULT 0, last_error text NOT NULL DEFAULT '', created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS version_cleanup_project ON version_cleanup_jobs(project_id);
+
+-- Earlier releases did not retain a complete login history. Start a durable,
+-- explicit baseline rather than guessing from surviving/expired sessions.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS login_count bigint NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at timestamptz;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS login_stats_since timestamptz NOT NULL DEFAULT now();
+ALTER TABLE project_cleanup_jobs ADD COLUMN IF NOT EXISTS owner_id text REFERENCES users(id);
+UPDATE project_cleanup_jobs j SET owner_id=(
+ SELECT a.actor_id FROM audit_logs a JOIN users u ON u.id=a.actor_id
+ WHERE a.action='delete_project' AND a.target_id=j.project_id ORDER BY a.id DESC LIMIT 1
+) WHERE j.owner_id IS NULL;

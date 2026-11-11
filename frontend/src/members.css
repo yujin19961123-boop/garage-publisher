@@ -1,0 +1,26 @@
+.members-table { font-size: 13px; }
+.members-table th { white-space: nowrap; }
+.members-table td { padding: 16px 11px; }
+.members-table .member-name { overflow-wrap: anywhere; min-width: 135px; max-width: 260px; }
+.members-table .member-name > span:last-child { vertical-align: middle; }
+.members-table .member-number { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.members-table .member-last-login { min-width: 90px; white-space: nowrap; }
+.members-table .member-actions { min-width: 145px; white-space: nowrap; }
+.members-table .member-actions button { margin: 3px 5px 3px 0; padding-inline: 10px; font-size: 12px; }
+.member-refresh { min-height: 40px; padding: 8px 15px; background: #f5f7f040; }
+.member-stats-note { margin: 16px 0 0; color: var(--muted); font-size: 11px; }
+@media (max-width: 900px) and (min-width: 601px) { .members-table { min-width: 760px; } }
+@media (max-width: 600px) {
+  .members-table, .members-table tbody { display: block; }
+  .members-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .members-table tbody { display: grid; gap: 14px; }
+  .members-table tr { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 16px 18px; padding: 18px; border: 1px solid #d5ded0; border-radius: 18px; background: #f7f8f14d; }
+  .members-table td { display: block; min-width: 0; padding: 0; border: 0; white-space: normal; }
+  .members-table td::before { display: block; margin-bottom: 5px; color: #7b8c7b; font-size: 11px; font-weight: 400; content: attr(data-label); }
+  .members-table .member-name { grid-column: 1 / -1; max-width: none; min-width: 0; font-size: 15px; }
+  .members-table .member-name::before { display: none; }
+  .members-table .member-last-login { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+  .members-table .member-actions { grid-column: 1 / -1; min-width: 0; padding-top: 10px; border-top: 1px solid #d9e0d4; }
+  .members-table .member-actions::before { display: none; }
+  .members-table .member-actions button { min-height: 44px; margin: 0 8px 0 0; }
+}

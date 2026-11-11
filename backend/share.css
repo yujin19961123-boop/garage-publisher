@@ -404,6 +404,7 @@ main {
   line-height:1;
   transition:background .3s,transform .4s;
 }
+.open-arrow svg { display:block; width:24px; height:24px; }
 .card-art {
   display:none;
   position:absolute;

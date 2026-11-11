@@ -73,6 +73,10 @@ func (a *app) previewWithPrefix(w http.ResponseWriter, r *http.Request, public, 
 		http.Error(w, "路径无效", 400)
 		return
 	}
+	if raw == "/.garage-favicon.svg" {
+		servePlatformFavicon(w, r)
+		return
+	}
 	for _, s := range strings.Split(raw, "/") {
 		if strings.HasPrefix(s, ".") {
 			http.NotFound(w, r)
@@ -106,6 +110,9 @@ func (a *app) previewWithPrefix(w http.ResponseWriter, r *http.Request, public, 
 		return
 	}
 	defer f.Close()
+	if servePrototypeWithFavicon(w, r, f, info, prefix) {
+		return
+	}
 	http.ServeContent(w, r, info.Name(), info.ModTime(), f)
 }
 

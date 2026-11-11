@@ -65,7 +65,7 @@ func (a *app) deleteProject(w http.ResponseWriter, r *http.Request, i identity, 
 		args []any
 	}{
 		{"INSERT INTO deleted_project_slugs(public_id) VALUES($1) ON CONFLICT DO NOTHING", []any{slug}},
-		{"INSERT INTO project_cleanup_jobs(project_id,deployment_ids) VALUES($1,$2)", []any{id, ids}},
+		{"INSERT INTO project_cleanup_jobs(project_id,deployment_ids,owner_id) VALUES($1,$2,$3)", []any{id, ids, owner}},
 		{"DELETE FROM releases WHERE project_id=$1", []any{id}},
 		{"DELETE FROM deployments WHERE project_id=$1", []any{id}},
 		{"DELETE FROM projects WHERE id=$1", []any{id}},
