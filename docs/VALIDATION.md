@@ -1,5 +1,40 @@
 # 测试指南
 
+## 发布进度动画（2026-11-11，仅本地）
+
+后续上线状态：以上两项改动已于2026-11-11收到本次明确授权后一起上线，详细验收和数据核对见[最近生产发布记录](PRODUCTION_GARAGE.md)。以下“仅本地/未上线”保留为开发阶段记录，不代表当前部署状态。
+
+创建和更新共用 `PublishProgress`：提交后用独立进度面板替换文件选择、帮助说明和提交按钮，处理时隐藏删除入口。面板使用莫兰迪渐变、玻璃上传图标和旋转光环，依次显示整理、上传和发布步骤；动画只改变位移、旋转与透明度，不逐帧重排布局。
+
+上传百分比直接使用 XHR 上传事件，100%仅表示文件已传送，仍须等待服务器确认；整理、等待、检查和发布使用无百分比的持续动画，不伪造处理进度。重新打开正在上传的项目时，在状态确认前不标记上传完成。减少动态效果偏好停用循环动画，保留文字和真实进度。成功沿用结果页并清空文件选择；失败恢复原选择以便重试。
+
+```powershell
+node scripts/test-publish-progress.mjs
+node scripts/test-ui-local.mjs
+```
+
+第一项在本地 Chrome 中模拟全部接口与上传传输，使用真实前端文件整理流程，验证整理阶段立即反馈、47%及100%传输事件、服务器阶段、重复提交和关闭锁定、390/320px布局、减少动态效果、失败保留文件并重试，以及创建和更新成功页。不会写业务数据。报告 `.local/publish-progress-report.json`，截图 `.local/publish-progress-upload.png`、`.local/publish-progress-mobile.png`。
+
+第二项使用本地真实 ZIP 与唯一临时项目验证发布和同地址更新、无效包保留旧版及成功结果页；结束删除测试项目，不修改现有项目。上述检查和前端构建均已通过，桌面/手机截图已查看。本次尚未同步上线。
+
+## 内部 Hash 路由适配修复（2026-11-11，仅本地）
+
+teleMail 原始导出文件在独立静态服务中可打开 App，旧发布副本点击时抛出 `Unknown mobile route`。旧规则因包内存在 `mobile` 目录，把内部路由表、调用参数及模板中的 `/mobile/...` 加上项目路径，但路由编解码的正则没有变化，破坏了 Hash 路由往返。修复保留内部路由标识，只在可识别资源及明确导航位置适配地址。
+
+`backend/hash_routes_test.go` 使用 Node 执行适配后的脚本，覆盖路由表与 Hash 编解码往返、动态图片、无扩展名资源、有点号的业务路由、真实导航地址及幂等处理。后端全量测试在本地 `TEST_DATABASE_URL` 下通过，包含隔离 schema 的数据库测试；`go vet` 通过。
+
+针对同一份 teleMail 原始导出文件的本地 Chrome 真实 ZIP 验证：
+
+```powershell
+$env:ORIGINAL_DIST_DIR='C:\path\to\teleMail\dist'
+try { node scripts/test-mobile-hash-routing.mjs }
+finally { Remove-Item Env:ORIGINAL_DIST_DIR -ErrorAction SilentlyContinue }
+```
+
+脚本要求本地服务和 `.env` 管理员可用。原始目录仅用于读取，自动打包后通过完整发布接口上传到唯一临时项目；不创建成员，不改现有项目，结束删除测试项目并退出测试会话。浏览器只允许本地原型 GET/HEAD 请求，不访问生产。
+
+实际验证已通过：App 展示完整 Apps 内容和图片、Chats/App 往返、带 Hash 子路由刷新、独立运行页面与懒加载 JS/CSS 均正常，无脚本异常。报告 `.local/mobile-hash-routing-report.json` 为 `success:true, cleanup:true`，已查看 `.local/mobile-hash-apps.png`。测试前后现有项目及当前版本快照一致。本地服务已加载修复；现有 mail 的历史文件没有原地重写，需重新上传原始导出文件才会应用新规则。未同步上线。
+
 ## 不需要数据库的检查
 
 使用 Go 1.26+ 和 Node.js 24+，在项目根目录执行：

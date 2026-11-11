@@ -40,9 +40,17 @@ async function api(route,method='GET',body,expected=200){
 }
 function archive(version){
  return zipSync({
-  'dist/index.html':strToU8('<!doctype html><html><head><meta charset="UTF-8"><link rel="stylesheet" href="/assets/site.css"></head><body><h1 id="version">loading</h1><script src="/assets/site.js"></script></body></html>'),
+  'dist/index.html':strToU8('<!doctype html><html><head><meta charset="UTF-8"><link rel="stylesheet" href="/assets/site.css"></head><body><h1 id="version">loading</h1><button id="app">App</button><p id="route"></p><img id="app-icon" alt="Apps icon"><script src="/assets/site.js"></script></body></html>'),
   'dist/assets/site.css':strToU8('h1 { color: rgb(18, 103, 124); }'),
-  'dist/assets/site.js':strToU8('document.getElementById("version").textContent="Garage '+version+'";'),
+  'dist/assets/site.js':strToU8('document.getElementById("version").textContent="Garage '+version+'";'+String.raw`
+const routes=['/mobile/im/chats','/mobile/im/apps'];
+function link(path){if(!routes.includes(path))throw Error('Unknown mobile route');return '#'+path.replace(/^\/mobile\//,'');}
+function show(){const name=location.hash.replace(/^#/,'')||'im/chats';const route=name.startsWith('mobile/')?'/'+name:\`/mobile/\${name}\`;if(!routes.includes(route))throw Error('Unknown mobile route');document.getElementById('route').textContent=route==='/mobile/im/apps'?'Apps ready':'Chats ready';}
+document.getElementById('app').onclick=()=>{location.hash=link('/mobile/im/apps');};
+document.getElementById('app-icon').src='/mobile/im/apps.svg';
+window.addEventListener('hashchange',show);show();
+`.replaceAll('\\`','`').replaceAll('\\${','${')),
+  'dist/mobile/im/apps.svg':strToU8('<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32" fill="#607c6c"/></svg>'),
  },{level:6});
 }
 async function taskResult(id,timeout=180000){
@@ -112,6 +120,12 @@ async function renderVersion(page,url,version){
   assert.equal(await page.locator('#version').evaluate(element=>getComputedStyle(element).color),'rgb(18, 103, 124)');
   assert.equal(failures.length,0,'Published JS/CSS request failed.');
   assert.equal(errors.length,0,'Published page raised a JavaScript error.');
+  await page.getByRole('button',{name:'App',exact:true}).click();
+  await page.getByText('Apps ready',{exact:true}).waitFor();
+  assert.equal(new URL(page.url()).hash,'#im/apps');
+  await page.reload({waitUntil:'networkidle'});await page.getByText('Apps ready',{exact:true}).waitFor();
+  assert.equal(await page.locator('#app-icon').evaluate(img=>img.complete&&img.naturalWidth===32),true);
+  assert.equal(errors.length,0,'Internal Hash route or resource adaptation failed.');
   const icon=await page.locator('link[rel="icon"]').getAttribute('href');
   assert.ok(icon,'Static prototype without its own icon must receive the platform icon.');
   const iconURL=new URL(icon,url);assert.equal(iconURL.origin,origin);
@@ -163,6 +177,7 @@ try{
  assert.ok(firstUsage.storageBytes>initialMetrics.storageBytes,'Published files must contribute to owner usage.');
  const {data:first}=await api('/projects/'+project.id);assert.equal(first.currentVersionNumber,1);assert.ok(first.currentReleaseId);
  pass('real ZIP published, HTML/JS rendered v1 and CSS applied in Chrome');
+ pass('internal Hash router App navigation, route refresh and mobile-directory assets survive path adaptation');
  await publish(archive('v2'),'SUCCEEDED');
  const {data:updated}=await api('/projects/'+project.id);
  assert.equal(updated.url,fixedURL,'Updating must preserve the public URL.');

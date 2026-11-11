@@ -20,7 +20,7 @@ func TestAdaptJavaScript(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	for _, want := range []string{"/tele/mail/a.svg", "`/tele/mobile/${x}/a.png`", "/tele/#inbox", "/tele/?prototype=1", `/\/assets\/\w+/g`, "https://a.com/assets/x", "//cdn/a", "/api/x", "./assets/a.js"} {
+	for _, want := range []string{"/tele/mail/a.svg", "`/tele/mobile/${x}/a.png`", "/#inbox", "/?prototype=1", `/\/assets\/\w+/g`, "https://a.com/assets/x", "//cdn/a", "/api/x", "./assets/a.js"} {
 		if !bytes.Contains(out, []byte(want)) {
 			t.Fatalf("missing %s in %s", want, out)
 		}

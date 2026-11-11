@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -18,6 +19,33 @@ import (
 type pathAdapter struct {
 	prefix string
 	roots  map[string]bool
+	files  map[string]bool
+}
+
+// Ordinary JS strings can be route IDs, lookup keys or router state, not URLs.
+// Only recognizable assets (or exact files in the upload) are safe to rewrite
+// globally. Explicit URL/navigation sinks are handled separately below.
+func (a pathAdapter) javascriptResource(s string) string {
+	if a.resourcePath(s) {
+		return a.rewrite(s)
+	}
+	return s
+}
+
+func (a pathAdapter) resourcePath(s string) bool {
+	if !strings.HasPrefix(s, "/") || strings.HasPrefix(s, "//") {
+		return false
+	}
+	name := strings.SplitN(strings.SplitN(s, "?", 2)[0], "#", 2)[0]
+	decoded, err := url.PathUnescape(strings.TrimPrefix(name, "/"))
+	if err == nil && a.files[decoded] {
+		return true
+	}
+	switch strings.ToLower(path.Ext(name)) {
+	case ".js", ".mjs", ".cjs", ".css", ".map", ".wasm", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".avif", ".ico", ".bmp", ".apng", ".ttf", ".otf", ".woff", ".woff2", ".eot", ".mp3", ".ogg", ".wav", ".mp4", ".webm":
+		return true
+	}
+	return false
 }
 
 func (a pathAdapter) rewrite(s string) string {
@@ -62,7 +90,7 @@ func (v *jsAdapter) Enter(n js.INode) js.IVisitor {
 	case *js.LiteralExpr:
 		if n.TokenType == js.StringToken && len(n.Data) >= 2 {
 			old := string(n.Data[1 : len(n.Data)-1])
-			s := v.a.rewrite(old)
+			s := v.a.javascriptResource(old)
 			if s != old {
 				n.Data = append(append([]byte{n.Data[0]}, []byte(s)...), n.Data[len(n.Data)-1])
 				v.changed = true
@@ -74,7 +102,13 @@ func (v *jsAdapter) Enter(n js.INode) js.IVisitor {
 				data := n.List[0].Value
 				if len(data) > 2 {
 					old := string(data[1 : len(data)-2])
-					s := v.a.rewrite(old)
+					// A dynamic resource such as /mobile/${id}/icon.svg is
+					// different from the internal route /mobile/${screen}.
+					tail := strings.TrimSuffix(strings.TrimPrefix(string(n.Tail), "}"), "`")
+					s := old
+					if v.a.resourcePath(old + "*" + tail) {
+						s = v.a.rewrite(old)
+					}
 					if s != old {
 						n.List[0].Value = []byte(string(data[:1]) + s + "${")
 						v.changed = true
@@ -82,7 +116,7 @@ func (v *jsAdapter) Enter(n js.INode) js.IVisitor {
 				}
 			} else if len(n.Tail) >= 2 {
 				old := string(n.Tail[1 : len(n.Tail)-1])
-				s := v.a.rewrite(old)
+				s := v.a.javascriptResource(old)
 				if s != old {
 					n.Tail = []byte("`" + s + "`")
 					v.changed = true
@@ -311,7 +345,7 @@ func adaptPathResources(root, prefix string) error {
 	if e != nil {
 		return e
 	}
-	a := pathAdapter{prefix: prefix, roots: map[string]bool{}}
+	a := pathAdapter{prefix: prefix, roots: map[string]bool{}, files: map[string]bool{}}
 	for _, entry := range entries {
 		a.roots[entry.Name()] = true
 	}
@@ -330,6 +364,11 @@ func adaptPathResources(root, prefix string) error {
 		}
 		total += info.Size()
 		files = append(files, p)
+		rel, err := filepath.Rel(root, p)
+		if err != nil {
+			return err
+		}
+		a.files[filepath.ToSlash(rel)] = true
 		return nil
 	})
 	if e != nil {

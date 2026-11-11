@@ -64,13 +64,20 @@ func (v *jsAdapter) adaptNavigationValue(value *js.IExpr) {
 	}
 	switch n := (*value).(type) {
 	case *js.LiteralExpr:
-		if n.TokenType == js.StringToken && (string(n.Data) == `"/"` || string(n.Data) == `'/'`) {
-			n.Data, _ = json.Marshal(v.a.prefix)
-			v.changed = true
+		if n.TokenType == js.StringToken && len(n.Data) >= 2 {
+			old := string(n.Data[1 : len(n.Data)-1])
+			rewritten := v.a.rewrite(old)
+			if old == "/" {
+				rewritten = v.a.prefix
+			}
+			if rewritten != old {
+				n.Data, _ = json.Marshal(rewritten)
+				v.changed = true
+			}
 		}
 		return
 	case *js.FuncDecl, *js.ArrowFunc, *js.MethodDecl:
-		return // Static strings are handled by the normal string visitor.
+		return // Function bodies are visited without changing their business values.
 	}
 	prefix, _ := json.Marshal(v.a.prefix)
 	roots, _ := json.Marshal(v.a.roots)

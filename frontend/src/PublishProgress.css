@@ -1,0 +1,41 @@
+.publish-progress { margin: 20px 0; padding: 30px 26px 24px; border: 1px solid #ffffffd9; border-radius: 22px; color: #476352; background: radial-gradient(ellipse at 20% 0%,#f9fcf5e0,transparent 65%),linear-gradient(135deg,#dce5d7,#e0dfe7); box-shadow: inset 0 1px 0 #fff,0 12px 32px #55736012; overflow: hidden; }
+.publish-motion { position: relative; display: grid; place-items: center; width: 90px; height: 90px; margin: 0 auto 22px; }
+.publish-orbit { position: absolute; inset: 0; border-radius: 50%; background: conic-gradient(from 30deg,transparent 20%,#809f8e35 65%,#597c69 92%,transparent); animation: publish-orbit 1.8s linear infinite; }
+.publish-orbit::after { content: ''; position: absolute; inset: 3px; border-radius: inherit; background: #e7ece3; }
+.publish-core { position: relative; display: grid; place-items: center; width: 67px; height: 67px; border: 1px solid #ffffffd9; border-radius: 24px; background: linear-gradient(145deg,#ffffffe0,#c6d6cb80); box-shadow: inset 0 1px 4px #fff,0 6px 14px #5e79611a; }
+.publish-core .action-icon { width: 29px; height: 29px; animation: publish-lift 1.8s ease-in-out infinite; }
+.publish-progress-heading { display: flex; align-items: baseline; justify-content: center; flex-wrap: wrap; gap: 12px; min-height: 34px; }
+.publish-progress h4 { margin: 0; font-size: 19px; font-weight: 650; line-height: 1.6; }
+.publish-dots { display: inline-flex; gap: 3px; margin-left: 5px; vertical-align: middle; }
+.publish-dots i { width: 3px; height: 3px; border-radius: 50%; background: currentColor; animation: publish-dot 1.2s ease-in-out infinite; }
+.publish-dots i:nth-child(2) { animation-delay: .16s; }
+.publish-dots i:nth-child(3) { animation-delay: .32s; }
+.publish-percent { font-family: var(--mono); font-size: 25px; font-weight: 550; font-variant-numeric: tabular-nums; }
+.publish-percent small { margin-left: 3px; font-size: 12px; }
+.publish-filename { margin: 5px 0 0; color: #697c6c; text-align: center; font-size: 12px; line-height: 1.6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.publish-track { position: relative; height: 6px; margin: 24px 0; border-radius: 8px; overflow: hidden; background: #67836c26; }
+.publish-track > span { position: absolute; inset: 0; border-radius: inherit; background: linear-gradient(90deg,#92ac96,#587e68); transform-origin: left; transition: transform 240ms ease-out; }
+.publish-track.is-indeterminate > span { width: 38%; animation: publish-sweep 1.65s cubic-bezier(.45,0,.3,1) infinite; }
+.publish-steps { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; margin: 0; padding: 0; list-style: none; }
+.publish-steps li { display: flex; align-items: center; justify-content: center; gap: 7px; color: #79857b; font-size: 12px; }
+.publish-step-dot { display: grid; flex-shrink: 0; place-items: center; width: 22px; height: 22px; border: 1px solid #a1b39e70; border-radius: 50%; font: 10px var(--mono); }
+.publish-step-dot .action-icon { width: 13px; height: 13px; }
+.publish-steps .is-complete { color: #53755d; }
+.publish-steps .is-complete .publish-step-dot { border-color: #c4d6bd; background: #edf4e7; }
+.publish-steps .is-current { color: #3c5e48; font-weight: 650; }
+.publish-steps .is-current .publish-step-dot { border-color: #60836c; color: #f7fbf0; background: #60836c; box-shadow: 0 0 0 3px #819c7c1a; }
+@keyframes publish-orbit { to { transform: rotate(360deg); } }
+@keyframes publish-lift { 0%,100% { transform: translateY(2px); } 50% { transform: translateY(-3px); } }
+@keyframes publish-dot { 0%,80%,100% { opacity: .3; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-2px); } }
+@keyframes publish-sweep { from { transform: translateX(-110%); } to { transform: translateX(365%); } }
+@media (max-width: 480px) {
+ .publish-progress { padding: 25px 15px 22px; border-radius: 18px; }
+ .publish-progress h4 { font-size: 17px; }
+ .publish-steps { gap: 5px; }
+ .publish-steps li { flex-direction: column; gap: 7px; font-size: 11px; }
+}
+@media (prefers-reduced-motion: reduce) {
+ .publish-orbit,.publish-core .action-icon,.publish-dots i,.publish-track.is-indeterminate > span { animation: none; }
+ .publish-track > span { transition: none; }
+ .publish-track.is-indeterminate > span { width: 100%; opacity: .45; }
+}

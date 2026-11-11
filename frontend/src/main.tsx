@@ -14,6 +14,7 @@ import {ActionIcon} from './ActionIcon';
 import {InlineProjectName,type NameEditor} from './InlineProjectName';
 import {usePointerSurfaces} from './usePointerSurfaces';
 import {FileSelection} from './FileSelection';
+import {PublishProgress} from './PublishProgress';
 import {prepareArchive,type Selection,type UploadLimits} from './upload-input';
 
 type User = Member;
@@ -22,7 +23,6 @@ type Project = {id:string; name:string; ownerId:string; status:string; url:strin
 type SharePage = {url:string; publishedCount:number};
 type Config = UploadLimits;
 const active = (d?:Deployment) => !!d && !['SUCCEEDED','FAILED','succeeded','failed'].includes(d.status);
-const labels:Record<string,string>={UPLOADING:'等待上传',QUEUED:'等待处理',VALIDATING:'正在检查文件',PREPARING:'正在发布',SUCCEEDED:'发布成功',FAILED:'发布失败'};
 let csrfToken = '';
 async function api<T>(path:string, method='GET', data?:unknown,signal?:AbortSignal):Promise<T> {
   const res=await fetch('/api/v1'+path,{method,signal,credentials:'same-origin',headers:{'Content-Type':'application/json',...(csrfToken?{'X-CSRF-Token':csrfToken}:{})},body:data===undefined?undefined:JSON.stringify(data)});
@@ -119,6 +119,7 @@ function App(){
   finally{if(deleteLock.current===operation){deleteLock.current=null;if(!signal.aborted)setDeleting(false);}}
  }
  const pageTab=user?.role==='admin'&&tab==='users'?'users':'projects';
+ const publishingUpdate=(busy&&updateSubmitLock.current)||active(task);
  const navigationItems=[{id:'projects',label:'项目',ariaLabel:'项目列表',number:'01'},...(user?.role==='admin'?[{id:'users',label:'成员',ariaLabel:'成员管理',number:'02'}]:[])];
  if(loading)return <div className="loading"><SignalMark/><span>正在打开发布台</span></div>;
  if(!user)return <div className="login">
@@ -168,13 +169,13 @@ function App(){
    <InlineProjectName key={selected.id} ref={nameEditor} name={selected.name} editable={selected.ownerId===user.id} disabled={busy||active(task)||selectionBusy||deleting||versionSwitching} onSave={async(name,signal)=>{const saved=await api<Project>('/projects/'+selected.id,'PATCH',{name},signal);if(signal.aborted)return;setSelected(current=>current?.id===selected.id?{...current,name:saved.name}:current);setProjects(items=>items.map(item=>item.id===selected.id?{...item,name:saved.name}:item));}}/>
    {error&&<div role="alert" className="alert">{error}</div>}{notice&&<div className="success" role="status">{notice}</div>}
    {selected.ownerId===user.id&&<><h3>{selected.lastPublishedAt?'上传更新':'首次发布'}</h3><form onSubmit={e=>{e.preventDefault();if(!selection||busy||active(task)||deleting||updateSubmitLock.current||versionSwitchLock.current||deleteLock.current)return;updateSubmitLock.current=true;void action(async()=>{setTask(undefined);const signal=updateController.current.signal;const archive=await prepareArchive(selection,config,setPrepareStage,signal);setPrepareStage('');const d=await api<Deployment>('/projects/'+selected.id+'/deployments','POST',{},signal);ownDeploymentId.current=d.id;setTask(d);setProgress(0);try{await upload(d.id,archive,setProgress,signal);setTask(await api<Deployment>('/deployments/'+d.id));}catch(err){const latest=await api<Deployment>('/deployments/'+d.id).catch(()=>d);setTask(latest);if(latest.status!=='SUCCEEDED'){if(active(latest))setNotice('正在确认发布结果…');else throw err;}}finally{setProgress(null);try{await refresh();}catch{if(!signal.aborted)setNotice('列表暂时无法刷新，请稍后重试。');}}}).finally(()=>{updateSubmitLock.current=false;});}}>
+    {publishingUpdate?<PublishProgress selection={selection} preparing={prepareStage} percent={progress} taskStatus={active(task)?task?.status:undefined}/>:<>
     <FileSelection value={selection} onChange={setSelection} disabled={busy||active(task)||deleting||versionSwitching} limits={config} onBusyChange={setSelectionBusy}/>
     <UploadHelp config={config} copy={copy}/>
-    {prepareStage&&<p role="status" className="task-state">{prepareStage}</p>}
-    {progress!==null&&<><progress value={progress} max={100}/><p className="small" role="status">正在上传 {progress}%</p></>}
-    {task&&task.status!=='SUCCEEDED'&&<div className={task.status==='FAILED'?'alert':'task-state'} role="status">{task.status==='FAILED'?'上次上传失败':labels[task.status.toUpperCase()]||'正在发布'}{task.errorMessage&&<p>{task.errorMessage}</p>}{task.status==='FAILED'&&selected.lastPublishedAt&&<p>旧版仍可访问。</p>}</div>}
+    {task?.status==='FAILED'&&<div className="alert" role="status">上次上传失败{task.errorMessage&&<p>{task.errorMessage}</p>}{selected.lastPublishedAt&&<p>旧版仍可访问。</p>}</div>}
     <button data-pointer-surface="button" className="primary full" disabled={!selection||busy||active(task)||selectionBusy||deleting||versionSwitching}><span>{busy?'正在上传…':active(task)?'正在发布…':selected.lastPublishedAt?'发布更新':'上传并发布'}</span><ActionIcon name="upload"/></button>
-   </form><div className="delete-project">{confirmDelete?<div className="delete-confirm" role="group" aria-label="确认删除项目"><strong>确定删除这个项目？</strong><p>无法恢复，原分享链接将失效。</p><div className="share-actions"><button disabled={deleting} onClick={()=>setConfirmDelete(false)}>取消</button><button className="danger" disabled={busy||active(task)||selectionBusy||deleting||versionSwitching} onClick={removeProject}>{deleting?'正在删除…':'确认删除'}</button></div></div>:<button className="delete-entry" disabled={busy||active(task)||selectionBusy||deleting||versionSwitching} onClick={()=>{setError('');setConfirmDelete(true);}}>删除项目</button>}</div></>}
+    </>}
+   </form>{!publishingUpdate&&<div className="delete-project">{confirmDelete?<div className="delete-confirm" role="group" aria-label="确认删除项目"><strong>确定删除这个项目？</strong><p>无法恢复，原分享链接将失效。</p><div className="share-actions"><button disabled={deleting} onClick={()=>setConfirmDelete(false)}>取消</button><button className="danger" disabled={busy||active(task)||selectionBusy||deleting||versionSwitching} onClick={removeProject}>{deleting?'正在删除…':'确认删除'}</button></div></div>:<button className="delete-entry" disabled={busy||active(task)||selectionBusy||deleting||versionSwitching} onClick={()=>{setError('');setConfirmDelete(true);}}>删除项目</button>}</div>}</>}
    </>}
   </ModalFrame>}
   {selected&&projectView==='versions'&&selected.ownerId===user.id&&<ModalFrame className="wide version-modal" label="版本管理" locked={versionSwitching} onClose={()=>{setSelected(null);setTask(undefined);}}>
@@ -210,7 +211,7 @@ function CreateProjectModal({config,onClose,onChange}:{config:Config;onClose:()=
     if(stopped||!mounted.current)return;
     setTask(next);
     if(next.status==='SUCCEEDED'){
-     setSuccess(true);setError('');
+     setSuccess(true);setSelection(null);setError('');
      const saved=savedProject.current;
      if(saved){
       try{
@@ -278,13 +279,12 @@ function CreateProjectModal({config,onClose,onChange}:{config:Config;onClose:()=
    <div className="share-actions"><button data-pointer-surface="button" className="primary" onClick={()=>copyText(project.url)}>复制链接</button><a href={project.url} target="_blank" rel="noopener noreferrer">打开原型<ActionIcon name="external"/></a><button onClick={close}>完成</button></div>
   </>:<form onSubmit={submit}>
    <label>项目名称<input value={name} onChange={e=>setName(e.target.value)} required maxLength={100} disabled={busy} placeholder="给这个想法起个名字"/></label>
+   {requestBusy||active(task)?<PublishProgress selection={selection} preparing={prepareStage} percent={progress} taskStatus={active(task)?task?.status:undefined}/>:<>
    <FileSelection value={selection} onChange={setSelection} disabled={requestBusy||active(task)} limits={config} onBusyChange={setSelectionBusy}/>
    <UploadHelp config={config} copy={copyText}/>
-   {prepareStage&&<p role="status" className="task-state">{prepareStage}</p>}
-   {progress!==null&&<><progress value={progress} max={100}/><p role="status" className="small">正在上传 {progress}%</p></>}
-   {active(task)&&<p className="task-state" role="status">{labels[task!.status]||'正在发布'}…</p>}
    {project&&!busy&&<p className="small muted">项目已保留，可直接重试。</p>}
    <button data-pointer-surface="button" className="primary full" disabled={busy||!selection||!config.maxUploadBytes}><span>{busy?'正在发布…':project?'重试发布':'创建并发布'}</span><ActionIcon name="upload"/></button>
+   </>}
   </form>}
  </ModalFrame>;
 }
