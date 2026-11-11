@@ -10,9 +10,23 @@ import (
 )
 
 func (a *app) projectList(r *http.Request, i identity, id string) ([]map[string]any, error) {
-	rows, e := a.db.Query(r.Context(), `SELECT p.id,p.public_id,p.owner_id,p.name,p.current_release_id,p.last_published_at,r.version_number FROM projects p LEFT JOIN releases r ON r.id=p.current_release_id WHERE ($1='admin' OR p.owner_id=$2) AND ($3='' OR p.id=$3) ORDER BY p.created_at DESC`, i.Role, i.ID, id)
+	collection, e := a.projectCollection(r, i, id)
+	return collection.Items, e
+}
+func (a *app) projectCollection(r *http.Request, i identity, id string) (projectCollection, error) {
+	result := projectCollection{Items: []map[string]any{}, SortMode: "updated"}
+	tx, e := a.db.BeginTx(r.Context(), pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if e != nil {
-		return nil, e
+		return result, e
+	}
+	defer tx.Rollback(r.Context())
+	e = tx.QueryRow(r.Context(), "SELECT mode,revision FROM project_list_preferences WHERE user_id=$1", i.ID).Scan(&result.SortMode, &result.SortRevision)
+	if e != nil && !errors.Is(e, pgx.ErrNoRows) {
+		return result, e
+	}
+	rows, e := tx.Query(r.Context(), `SELECT p.id,p.public_id,p.owner_id,p.name,p.current_release_id,p.last_published_at,r.version_number,p.updated_at FROM projects p LEFT JOIN releases r ON r.id=p.current_release_id LEFT JOIN project_list_order o ON o.project_id=p.id AND o.user_id=$2 WHERE ($1='admin' OR p.owner_id=$2) AND ($3='' OR p.id=$3) ORDER BY CASE WHEN $4='manual' THEN o.position END ASC NULLS FIRST,p.updated_at DESC,p.created_at DESC,p.id`, i.Role, i.ID, id, result.SortMode)
+	if e != nil {
+		return result, e
 	}
 	defer rows.Close()
 	items := []map[string]any{}
@@ -21,37 +35,42 @@ func (a *app) projectList(r *http.Request, i identity, id string) ([]map[string]
 		var release *string
 		var published *time.Time
 		var number *int
-		if e = rows.Scan(&pid, &pub, &owner, &n, &release, &published, &number); e != nil {
-			return nil, e
+		var updated time.Time
+		if e = rows.Scan(&pid, &pub, &owner, &n, &release, &published, &number, &updated); e != nil {
+			return result, e
 		}
 		status := "unpublished"
 		if release != nil {
 			status = "published"
 		}
-		items = append(items, map[string]any{"id": pid, "publicId": pub, "ownerId": owner, "name": n, "status": status, "url": a.url(pub), "lastPublishedAt": published, "currentReleaseId": release, "currentVersionNumber": number})
+		items = append(items, map[string]any{"id": pid, "publicId": pub, "ownerId": owner, "name": n, "status": status, "url": a.url(pub), "lastPublishedAt": published, "updatedAt": updated, "currentReleaseId": release, "currentVersionNumber": number})
 	}
 	if e = rows.Err(); e != nil {
-		return nil, e
+		return result, e
 	}
 	rows.Close()
 	for _, p := range items {
 		var did, ds, de string
-		err := a.db.QueryRow(r.Context(), "SELECT id,status,error_message FROM deployments WHERE project_id=$1 ORDER BY created_at DESC LIMIT 1", p["id"]).Scan(&did, &ds, &de)
+		err := tx.QueryRow(r.Context(), "SELECT id,status,error_message FROM deployments WHERE project_id=$1 ORDER BY created_at DESC LIMIT 1", p["id"]).Scan(&did, &ds, &de)
 		if err == nil {
 			p["latestDeployment"] = map[string]any{"id": did, "status": ds, "errorMessage": de}
 		}
 	}
-	return items, nil
+	result.Items = items
+	return result, tx.Commit(r.Context())
 }
 func (a *app) projects(w http.ResponseWriter, r *http.Request, i identity, p []string) error {
 	ctx := r.Context()
 	if len(p) == 1 && r.Method == "GET" {
-		v, e := a.projectList(r, i, "")
+		v, e := a.projectCollection(r, i, "")
 		if e != nil {
 			return e
 		}
-		write(w, map[string]any{"items": v})
+		write(w, v)
 		return nil
+	}
+	if len(p) == 2 && p[1] == "order" && r.Method == "PUT" {
+		return a.saveProjectOrder(w, r, i)
 	}
 	if len(p) == 1 && r.Method == "POST" {
 		var in struct{ Name string }
@@ -118,7 +137,7 @@ func (a *app) projects(w http.ResponseWriter, r *http.Request, i identity, p []s
 		if len(in.Name) == 0 || len(in.Name) > 200 {
 			return apiError{422, "INVALID_INPUT", "名称太长，请缩短后重试"}
 		}
-		_, e := a.db.Exec(ctx, "UPDATE projects SET name=$1 WHERE id=$2", in.Name, p[1])
+		_, e := a.db.Exec(ctx, "UPDATE projects SET updated_at=CASE WHEN name IS DISTINCT FROM $1 THEN clock_timestamp() ELSE updated_at END,name=$1 WHERE id=$2", in.Name, p[1])
 		if e != nil {
 			return e
 		}

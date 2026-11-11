@@ -210,7 +210,7 @@ func (a *app) activateVersion(w http.ResponseWriter, r *http.Request, i identity
 		if e = validateVersionFiles(a.data, pid, rid); e != nil {
 			return apiError{409, "VERSION_UNAVAILABLE", "版本文件不完整，无法切换；当前版本保持不变"}
 		}
-		if _, e = tx.Exec(ctx, "UPDATE projects SET current_release_id=$2,last_published_at=now() WHERE id=$1", pid, rid); e != nil {
+		if _, e = tx.Exec(ctx, "UPDATE projects SET current_release_id=$2,last_published_at=now(),updated_at=clock_timestamp() WHERE id=$1", pid, rid); e != nil {
 			return e
 		}
 		if _, e = tx.Exec(ctx, "INSERT INTO audit_logs(actor_id,action,target_id) VALUES($1,'activate_version',$2)", i.ID, rid); e != nil {

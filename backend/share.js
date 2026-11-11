@@ -39,5 +39,8 @@ document.addEventListener('pointermove', event => {
 }, {passive: true});
 document.addEventListener('pointerout', event => { if (!event.relatedTarget) reset(); }, {passive: true});
 window.addEventListener('blur', reset);
+window.addEventListener('scroll', reset, {passive: true});
+window.addEventListener('resize', reset);
+document.addEventListener('visibilitychange', reset);
 fine.addEventListener('change', reset);
 reduced.addEventListener('change', reset);

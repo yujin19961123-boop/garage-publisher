@@ -13,6 +13,7 @@
 - 管理员创建、停用成员账号及重置密码；成员登录后管理自己的项目。
 - 管理员查看成员文件占用、成功登录次数及最近登录时间；登录数据自统计功能启用后累计，详见[成员使用统计](docs/MEMBER_STATS.md)。
 - 创建项目并上传发布，更新已有项目时保留分享地址；改名不改地址。
+- 项目默认按最近更新排序；支持桌面拖拽、触屏长按和键盘调整，按账号保存并同步个人合集顺序。
 - 项目名称生成拼音标识，重名依次追加 `111`、`222` 等三位以内数字。
 - 上传失败、校验失败或适配失败时，已有线上版本保持可访问。
 - 项目卡片的“版本管理”入口可独立查看上传记录，并切换最近 5 个成功版本（包含当前版本）；旧文件自动清理，记录保留，原分享地址不变。
@@ -21,7 +22,7 @@
 - 管理员可查看全部项目，但不能编辑、更新或删除其他成员项目。
 - 支持常见 Vite 产物及 Next.js 静态导出，自动适配可识别的资源与页面路径。
 
-详细说明：[文件上传](docs/UPLOAD_INPUTS.md)、[Next.js 静态导出](docs/NEXT_STATIC.md)、[全部原型分享](docs/SHARE_PAGE.md)、[版本管理](docs/VERSIONS.md)、[删除项目](docs/DELETE_PROJECT.md)、[开发基线](docs/DEVELOPMENT_BASELINE.md)、[测试指南](docs/VALIDATION.md)。开发基线包含历史设计，当前行为以代码和对应功能说明为准。
+详细说明：[文件上传](docs/UPLOAD_INPUTS.md)、[Next.js 静态导出](docs/NEXT_STATIC.md)、[全部原型分享](docs/SHARE_PAGE.md)、[项目排序](docs/PROJECT_ORDER.md)、[合集底部互动](docs/SHARE_PLAY.md)、[版本管理](docs/VERSIONS.md)、[删除项目](docs/DELETE_PROJECT.md)、[开发基线](docs/DEVELOPMENT_BASELINE.md)、[测试指南](docs/VALIDATION.md)。开发基线包含历史设计，当前行为以代码和对应功能说明为准。
 
 ## 项目结构
 

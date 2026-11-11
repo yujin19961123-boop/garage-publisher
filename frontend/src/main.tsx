@@ -15,6 +15,7 @@ import {InlineProjectName,type NameEditor} from './InlineProjectName';
 import {usePointerSurfaces} from './usePointerSurfaces';
 import {FileSelection} from './FileSelection';
 import {PublishProgress} from './PublishProgress';
+import {SortableProjectGrid} from './SortableProjectGrid';
 import {prepareArchive,type Selection,type UploadLimits} from './upload-input';
 
 type User = Member;
@@ -22,6 +23,7 @@ type Deployment = {id:string; status:string; errorMessage?:string};
 type Project = {id:string; name:string; ownerId:string; status:string; url:string; currentReleaseId:string|null; currentVersionNumber:number|null; lastPublishedAt?:string; latestDeployment?:Deployment};
 type SharePage = {url:string; publishedCount:number};
 type Config = UploadLimits;
+type ProjectCollection={items:Project[];sortMode?:'updated'|'manual';sortRevision?:number};
 const active = (d?:Deployment) => !!d && !['SUCCEEDED','FAILED','succeeded','failed'].includes(d.status);
 let csrfToken = '';
 async function api<T>(path:string, method='GET', data?:unknown,signal?:AbortSignal):Promise<T> {
@@ -44,6 +46,7 @@ function App(){
  usePointerSurfaces();
  const [user,setUser]=useState<User|null>(null),[loading,setLoading]=useState(true),[error,setError]=useState(''),[notice,setNotice]=useState('');
  const [projects,setProjects]=useState<Project[]>([]),[users,setUsers]=useState<User[]>([]),[tab,setTab]=useState('projects'),[config,setConfig]=useState<Config>({});
+ const [sortRevision,setSortRevision]=useState(0),[ordering,setOrdering]=useState(false),orderLock=useRef(false);
  const currentUserId=useRef(user?.id);currentUserId.current=user?.id;
  const [selected,setSelected]=useState<Project|null>(null),[showCreate,setShowCreate]=useState(false),[busy,setBusy]=useState(false),[progress,setProgress]=useState<number|null>(null);
  const [projectView,setProjectView]=useState<'publish'|'versions'>('publish');
@@ -63,7 +66,17 @@ function App(){
  useEffect(()=>{updateController.current=new AbortController();return()=>updateController.current.abort();},[user?.id]);
  const [selectionBusy,setSelectionBusy]=useState(false),[prepareStage,setPrepareStage]=useState('');
  useEffect(()=>{setShowShare(false);setShowCreate(false);},[user?.id]);
- const refresh=async()=>{const requestedUser=currentUserId.current;const data=await api<{items:Project[]}>('/projects');if(currentUserId.current!==requestedUser)return [];const items=data.items||[];setProjects(items);setSelected(p=>p?(items.find(x=>x.id===p.id)||p):null);return items;};
+ function acceptCollection(data:ProjectCollection){const items=data.items||[];setProjects(items);setSortRevision(data.sortRevision||0);return items;}
+ const refresh=async()=>{const requestedUser=currentUserId.current;const data=await api<ProjectCollection>('/projects');if(currentUserId.current!==requestedUser)return [];const items=acceptCollection(data);setSelected(p=>p?(items.find(x=>x.id===p.id)||p):null);return items;};
+ useEffect(()=>{setSortRevision(0);setOrdering(false);orderLock.current=false;},[user?.id]);
+ async function saveOrder(ids:string[]){
+  if(orderLock.current||!user)return;
+  const owner=user.id,before=projects;orderLock.current=true;setOrdering(true);setError('');
+  const positions=new Map(ids.map((id,index)=>[id,index]));setProjects(items=>[...items].sort((a,b)=>positions.get(a.id)!-positions.get(b.id)!));
+  try{const data=await api<ProjectCollection>('/projects/order','PUT',{mode:'manual',projectIds:ids,expectedRevision:sortRevision},updateController.current.signal);if(currentUserId.current===owner){acceptCollection(data);setNotice('顺序已保存，已同步到分享页');}}
+  catch(e){if(currentUserId.current===owner){setProjects(before);setError((e as Error).message||'排序保存失败，请重试');try{await refresh();}catch{ /* Keep the last confirmed order. */ }}}
+  finally{if(currentUserId.current===owner){orderLock.current=false;setOrdering(false);}}
+ }
  useEffect(()=>{api<{user:User}>('/me').then(result=>setUser(result.user)).catch(()=>{}).finally(()=>setLoading(false));const expired=()=>{setUser(null);setError('登录已失效，请重新登录');};window.addEventListener('session-expired',expired);return()=>window.removeEventListener('session-expired',expired);},[]);
  useEffect(()=>{if(!user)return;refresh().catch(e=>setError(e.message));api<Config>('/platform-config').then(setConfig).catch(e=>setError(e.message));},[user]);
  useEffect(()=>{if(!user||!active(task))return;let stopped=false;const timer=setInterval(async()=>{try{const d=await api<Deployment>('/deployments/'+task!.id);if(stopped)return;setTask(d);if(!active(d)){const items=await refresh();if(!stopped)setSelected(p=>items.find(x=>x.id===p?.id)||p);}}catch(e){if(!stopped)setError((e as Error).message);}},2000);return()=>{stopped=true;clearInterval(timer);};},[user?.id,task?.id,task?.status]);
@@ -137,19 +150,19 @@ function App(){
    <div className="account"><span className="avatar" aria-hidden="true">{user.username.slice(0,1).toUpperCase()}</span><div><strong className="account-name">{user.username}</strong><span className="account-role">{user.role==='admin'?'管理员':'团队成员'}</span></div><button className="logout" aria-label="退出登录" onClick={()=>action(async()=>{await api('/auth/logout','POST');setUser(null);setSelected(null);setTask(undefined);})}>退出<ActionIcon name="logout"/></button></div>
   </aside>
   <main className="workspace">
-   {pageTab==='projects'?<ProjectWelcome key={user.id} userId={user.id} count={projects.length} published={projects.filter(p=>p.lastPublishedAt).length} blocked={!!selected||showCreate||showShare||!!resetUser||busy||openingShare} openingShare={openingShare} onOpenShare={openOwnShare} onShare={()=>setShowShare(true)} onCreate={()=>setShowCreate(true)}/>:<header className="masthead" key={pageTab} data-pointer-surface="hero">
+   {pageTab==='projects'?<ProjectWelcome key={user.id} userId={user.id} count={projects.length} published={projects.filter(p=>p.lastPublishedAt).length} blocked={!!selected||showCreate||showShare||!!resetUser||busy||openingShare||ordering} openingShare={openingShare} onOpenShare={openOwnShare} onShare={()=>setShowShare(true)} onCreate={()=>setShowCreate(true)}/>:<header className="masthead" key={pageTab} data-pointer-surface="hero">
     <div className="headline-block"><span className="eyebrow">GOOD COMPANY / 02</span><h1 aria-label="成员管理"><span>一起</span><em>创造<span className="title-dot">。</span></em></h1></div>
     <button type="button" className="hero-mark share-orb" data-pointer-surface="orb" onClick={openOwnShare} disabled={openingShare||busy} aria-label="查看我的全部原型" aria-busy={openingShare} title={openingShare?'正在打开分享页…':'查看我的全部原型'}><SignalMark/></button>
    </header>}
    {error&&!selected&&<div className="alert" role="alert">{error}<button onClick={()=>setError('')} aria-label="关闭错误">×</button></div>}
    {notice&&!selected&&<div className="success toast" role="status"><span aria-hidden="true">✓</span>{notice}<button onClick={()=>setNotice('')} aria-label="关闭提示">×</button></div>}
    {pageTab==='projects'?<div className="project-content">
-    {!projects.length?<div className="empty"><span className="empty-number" aria-hidden="true">000</span><h2 className="empty-title">下一个好点子，<br/>从这里出发。</h2><button className="empty-create" aria-label="创建项目" onClick={()=>setShowCreate(true)}><span aria-hidden="true">＋</span><span>创建项目</span></button></div>:<div className="project-grid">{projects.map((p,index)=><article data-pointer-surface="card" className="project" key={p.id} style={{'--order':Math.min(index,8)} as React.CSSProperties}>
+    {!projects.length?<div className="empty"><span className="empty-number" aria-hidden="true">000</span><h2 className="empty-title">下一个好点子，<br/>从这里出发。</h2><button className="empty-create" aria-label="创建项目" onClick={()=>setShowCreate(true)}><span aria-hidden="true">＋</span><span>创建项目</span></button></div>:<SortableProjectGrid ids={projects.map(p=>p.id)} disabled={ordering||busy||!!selected||showCreate||showShare||!!resetUser} saving={ordering} onReorder={saveOrder}>{projects.map((p,index)=><article data-pointer-surface="card" data-project-id={p.id} tabIndex={0} aria-describedby="project-order-help" aria-label={p.name} className="project" key={p.id} style={{'--order':Math.min(index,8)} as React.CSSProperties}>
      <div className="project-top"><span className="project-number">{String(index+1).padStart(2,'0')}<span aria-hidden="true"> /</span></span><span className={'badge project-status '+(active(p.latestDeployment)?'processing':p.lastPublishedAt?'published':'unpublished')}>{active(p.latestDeployment)?'发布中':p.lastPublishedAt?'已发布':'未发布'}</span></div>
      <div className="project-body"><h2 className="project-name" title={p.name}>{p.name}</h2><div className="timestamp">{p.lastPublishedAt?<><span>上次发布</span><strong><RelativeTime value={p.lastPublishedAt}/></strong></>:<span>等待首次发布</span>}</div>{p.latestDeployment?.status==='FAILED'&&<p className="task-error">上次发布失败，{p.lastPublishedAt?'旧版仍可访问':'可重新上传'}</p>}</div>
      <div className="project-path" title={p.url}><span aria-hidden="true">↳</span><span>{new URL(p.url,window.location.origin).pathname}</span></div>
      <footer><button className="project-manage" onClick={()=>open(p)}>{p.ownerId===user.id?p.lastPublishedAt?'发布更新':'首次发布':'查看详情'}</button>{p.ownerId===user.id&&<button className="project-versions" onClick={()=>open(p,'versions')}>版本管理</button>}{p.lastPublishedAt&&<><button className="project-copy" onClick={()=>copy(p.url)}>复制链接</button><a className="project-open" href={p.url} target="_blank" rel="noopener noreferrer" aria-label={'打开原型：'+p.name}><ActionIcon name="external"/></a></>}</footer>
-    </article>)}<button className="create-tile" onClick={()=>setShowCreate(true)}><span aria-hidden="true">＋</span><strong>下一个，轮到你。</strong><span>创建项目</span></button></div>}
+    </article>)}<button className="create-tile" onClick={()=>setShowCreate(true)}><span aria-hidden="true">＋</span><strong>下一个，轮到你。</strong><span>创建项目</span></button></SortableProjectGrid>}
     <footer className="app-footer"><span aria-hidden="true">◈ GARAGE</span><span>持有链接即可查看，请勿上传敏感资料。</span></footer>
    </div>:<>
     <section className="card member-create"><div className="section-heading"><span className="eyebrow">INVITE SOMETHING GREAT</span><h2>开通成员</h2></div><form className="inline-form" onSubmit={e=>{e.preventDefault();const el=e.currentTarget;const f=new FormData(el);action(async()=>{await api('/admin/users','POST',{username:f.get('username'),password:f.get('password')});setUsers((await api<{items:User[]}>('/admin/users')).items);el.reset();setNotice('成员账号已创建');});}}><label>账号<input name="username" placeholder="成员账号" required autoComplete="off"/></label><label>初始密码<input name="password" type="password" placeholder="至少6位，可纯数字" minLength={6} required autoComplete="new-password"/></label><button data-pointer-surface="button" className="primary" disabled={busy}>创建账号</button></form></section>
@@ -166,7 +179,7 @@ function App(){
     {error&&<div className="alert" role="alert">{error}</div>}{notice&&<div className="success" role="status">{notice}</div>}
     <div className="share-actions"><a href={selected.url} target="_blank" rel="noopener noreferrer">查看原型<ActionIcon name="external"/></a><button className="primary" onClick={()=>copy(selected.url)}>复制链接</button><button disabled={busy} onClick={()=>{setSelected(null);setTask(undefined);setUpdateSuccess(null);}}>完成</button></div>
    </>:<>
-   <InlineProjectName key={selected.id} ref={nameEditor} name={selected.name} editable={selected.ownerId===user.id} disabled={busy||active(task)||selectionBusy||deleting||versionSwitching} onSave={async(name,signal)=>{const saved=await api<Project>('/projects/'+selected.id,'PATCH',{name},signal);if(signal.aborted)return;setSelected(current=>current?.id===selected.id?{...current,name:saved.name}:current);setProjects(items=>items.map(item=>item.id===selected.id?{...item,name:saved.name}:item));}}/>
+   <InlineProjectName key={selected.id} ref={nameEditor} name={selected.name} editable={selected.ownerId===user.id} disabled={busy||active(task)||selectionBusy||deleting||versionSwitching} onSave={async(name,signal)=>{const saved=await api<Project>('/projects/'+selected.id,'PATCH',{name},signal);if(signal.aborted)return;setSelected(current=>current?.id===selected.id?{...current,name:saved.name}:current);setProjects(items=>items.map(item=>item.id===selected.id?{...item,name:saved.name}:item));try{await refresh();}catch{setNotice('名称已保存，列表稍后刷新即可更新顺序');}}}/>
    {error&&<div role="alert" className="alert">{error}</div>}{notice&&<div className="success" role="status">{notice}</div>}
    {selected.ownerId===user.id&&<><h3>{selected.lastPublishedAt?'上传更新':'首次发布'}</h3><form onSubmit={e=>{e.preventDefault();if(!selection||busy||active(task)||deleting||updateSubmitLock.current||versionSwitchLock.current||deleteLock.current)return;updateSubmitLock.current=true;void action(async()=>{setTask(undefined);const signal=updateController.current.signal;const archive=await prepareArchive(selection,config,setPrepareStage,signal);setPrepareStage('');const d=await api<Deployment>('/projects/'+selected.id+'/deployments','POST',{},signal);ownDeploymentId.current=d.id;setTask(d);setProgress(0);try{await upload(d.id,archive,setProgress,signal);setTask(await api<Deployment>('/deployments/'+d.id));}catch(err){const latest=await api<Deployment>('/deployments/'+d.id).catch(()=>d);setTask(latest);if(latest.status!=='SUCCEEDED'){if(active(latest))setNotice('正在确认发布结果…');else throw err;}}finally{setProgress(null);try{await refresh();}catch{if(!signal.aborted)setNotice('列表暂时无法刷新，请稍后重试。');}}}).finally(()=>{updateSubmitLock.current=false;});}}>
     {publishingUpdate?<PublishProgress selection={selection} preparing={prepareStage} percent={progress} taskStatus={active(task)?task?.status:undefined}/>:<>

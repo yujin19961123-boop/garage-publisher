@@ -7,6 +7,22 @@ CREATE TABLE IF NOT EXISTS releases(id text PRIMARY KEY, project_id text NOT NUL
 CREATE TABLE IF NOT EXISTS audit_logs(id bigserial PRIMARY KEY, actor_id text NOT NULL, action text NOT NULL, target_id text NOT NULL, created_at timestamptz NOT NULL DEFAULT now());
 CREATE TABLE IF NOT EXISTS share_pages(owner_id text PRIMARY KEY REFERENCES users(id), public_id text UNIQUE NOT NULL, created_at timestamptz NOT NULL DEFAULT now());
 
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS updated_at timestamptz;
+UPDATE projects SET updated_at=GREATEST(created_at,COALESCE(last_published_at,created_at)) WHERE updated_at IS NULL;
+ALTER TABLE projects ALTER COLUMN updated_at SET DEFAULT now();
+ALTER TABLE projects ALTER COLUMN updated_at SET NOT NULL;
+CREATE TABLE IF NOT EXISTS project_list_preferences(
+ user_id text PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+ mode text NOT NULL CHECK(mode IN ('updated','manual')),
+ revision bigint NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS project_list_order(
+ user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ project_id text NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+ position bigint NOT NULL,
+ PRIMARY KEY(user_id,project_id)
+);
+
 ALTER TABLE projects DROP COLUMN IF EXISTS description;
 CREATE TABLE IF NOT EXISTS deleted_project_slugs(public_id text PRIMARY KEY, deleted_at timestamptz NOT NULL DEFAULT now());
 CREATE TABLE IF NOT EXISTS project_cleanup_jobs(project_id text PRIMARY KEY, deployment_ids text[] NOT NULL, attempts integer NOT NULL DEFAULT 0, last_error text NOT NULL DEFAULT '', created_at timestamptz NOT NULL DEFAULT now());

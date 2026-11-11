@@ -52,7 +52,7 @@ jobs:
         with:
           go-version: '1.26.x'
           cache-dependency-path: backend/go.sum
-      - run: go test -run '^Test(Versions|Member)' -v ./...
+      - run: go test -run '^Test(Versions|Member|ProjectOrder)' -v ./...
         working-directory: backend
 
   frontend:

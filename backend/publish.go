@@ -344,7 +344,7 @@ func (a *app) worker(ctx context.Context) {
 							_, te = tx.Exec(ctx, "INSERT INTO releases(id,project_id,deployment_id,route_mode,version_number,manifest_ready) SELECT $1,$2,$1,$3,COALESCE(max(version_number),0)+1,true FROM releases WHERE project_id=$2", id, pid, mode)
 						}
 						if te == nil {
-							_, te = tx.Exec(ctx, "UPDATE projects SET current_release_id=$1,last_published_at=now() WHERE id=$2", id, pid)
+							_, te = tx.Exec(ctx, "UPDATE projects SET current_release_id=$1,last_published_at=now(),updated_at=clock_timestamp() WHERE id=$2", id, pid)
 						}
 						if te == nil {
 							_, te = tx.Exec(ctx, "UPDATE deployments SET status='SUCCEEDED',updated_at=now() WHERE id=$1", id)

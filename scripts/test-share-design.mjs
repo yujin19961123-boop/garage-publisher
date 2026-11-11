@@ -21,7 +21,7 @@ try{
  page.on('console',message=>{if(message.type()==='error'&&/Content Security Policy|Refused to execute/i.test(message.text()))report.errors.push(message.text());});
  async function shot(label){await page.screenshot({path:directory+'share-design-'+label+'.png',fullPage:true,animations:'disabled'});report.screenshots.push('share-design-'+label+'.png');}
  async function layout(label){const metrics=await page.evaluate(()=>({width:innerWidth,scrollWidth:document.documentElement.scrollWidth,links:[...document.querySelectorAll('.project-link')].map(e=>({width:e.getBoundingClientRect().width,height:e.getBoundingClientRect().height}))}));assert.ok(metrics.scrollWidth<=metrics.width+1,label+' overflows horizontally');assert.ok(metrics.links.every(e=>e.width>=44&&e.height>=44));report.layouts.push({label,...metrics});}
- async function move(locator,x,y){await locator.scrollIntoViewIfNeeded();const b=await locator.boundingBox();await page.mouse.move(b.x+b.width*x,b.y+b.height*y);await page.waitForFunction(()=>!!document.querySelector('[data-active]'));return locator.evaluate(e=>e.style.getPropertyValue('--light-x'));}
+ async function move(locator,x,y){await locator.scrollIntoViewIfNeeded();await page.waitForTimeout(350);const b=await locator.boundingBox();await page.mouse.move(b.x+b.width*x,b.y+b.height*y);await page.waitForFunction(()=>!!document.querySelector('[data-active]'));return locator.evaluate(e=>e.style.getPropertyValue('--light-x'));}
  let source,headers;
  for(let index=0;index<paths.length;index++){
   await page.setViewportSize({width:1440,height:1000});

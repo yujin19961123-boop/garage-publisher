@@ -1,0 +1,12 @@
+.sortable-grid:not(.sort-locked) > .project { cursor: grab; }
+.sortable-grid { position: relative; }
+.sortable-grid .project :is(button,a,h2,.timestamp,.project-path,.badge,.project-number) { cursor: auto; }
+.sortable-grid .project :is(button,a) { cursor: pointer; }
+.sortable-grid > .project:focus-visible { outline: 2px solid #56735f; outline-offset: 4px; }
+.project-sorting { user-select: none; cursor: grabbing; }
+.project-sorting .project:not(.project-sort-ghost),.project-sort-settling .project:not(.project-sort-ghost) { transform: none !important; transition: none; }
+.project.is-sort-source { opacity: .25 !important; outline: 2px dashed #789681; outline-offset: -5px; }
+.project.is-sort-source > * { visibility: hidden; }
+.project.project-sort-ghost { position: fixed; left: 0; top: 0; z-index: 50; margin: 0; min-height: 0; pointer-events: none; opacity: .94; box-shadow: 0 22px 65px #314e4240; animation: none; transition: none; will-change: transform; transform-origin: 0 0; }
+.sort-locked > .project { cursor: default; }
+.project-order-accessible { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }

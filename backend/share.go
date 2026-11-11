@@ -89,15 +89,20 @@ var shareCSS string
 //go:embed share.js
 var shareJS string
 
+//go:embed share-play.js
+var sharePlayJS string
+
+func shareScript() string { return shareJS + "\n" + sharePlayJS }
+
 var shareTemplate = template.Must(template.New("share").Funcs(template.FuncMap{
 	"style":   func() template.CSS { return template.CSS(shareCSS) },
-	"script":  func() template.JS { return template.JS(shareJS) },
+	"script":  func() template.JS { return template.JS(shareScript()) },
 	"favicon": func() template.URL { return template.URL(platformFaviconDataURL()) },
 	"ordinal": func(n int) string { return fmt.Sprintf("%02d", n+1) },
 }).Parse(shareHTML))
 
 func shareCSP() string {
-	hash := sha256.Sum256([]byte(shareJS))
+	hash := sha256.Sum256([]byte(shareScript()))
 	return "default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'sha256-" + base64.StdEncoding.EncodeToString(hash[:]) + "'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 }
 
@@ -130,7 +135,7 @@ func (a *app) publicSharePage(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/_share/"+slug+"/", 301)
 		return
 	}
-	rows, e := a.db.Query(r.Context(), "SELECT name,public_id,last_published_at FROM projects WHERE owner_id=$1 AND current_release_id IS NOT NULL ORDER BY last_published_at DESC,id", owner)
+	rows, e := a.db.Query(r.Context(), `SELECT p.name,p.public_id,p.last_published_at FROM projects p LEFT JOIN project_list_preferences pref ON pref.user_id=$1 LEFT JOIN project_list_order o ON o.project_id=p.id AND o.user_id=$1 WHERE p.owner_id=$1 AND p.current_release_id IS NOT NULL ORDER BY CASE WHEN pref.mode='manual' THEN o.position END ASC NULLS FIRST,p.updated_at DESC,p.created_at DESC,p.id`, owner)
 	if e != nil {
 		http.Error(w, "暂时无法访问，请稍后重试", 503)
 		return
