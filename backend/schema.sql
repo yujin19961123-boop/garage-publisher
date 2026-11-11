@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS audit_logs(id bigserial PRIMARY KEY, actor_id text NO
 CREATE TABLE IF NOT EXISTS share_pages(owner_id text PRIMARY KEY REFERENCES users(id), public_id text UNIQUE NOT NULL, created_at timestamptz NOT NULL DEFAULT now());
 
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS updated_at timestamptz;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS unpublished boolean NOT NULL DEFAULT false;
 UPDATE projects SET updated_at=GREATEST(created_at,COALESCE(last_published_at,created_at)) WHERE updated_at IS NULL;
 ALTER TABLE projects ALTER COLUMN updated_at SET DEFAULT now();
 ALTER TABLE projects ALTER COLUMN updated_at SET NOT NULL;
@@ -31,14 +32,21 @@ ALTER TABLE releases ADD COLUMN IF NOT EXISTS version_number integer;
 ALTER TABLE releases ADD COLUMN IF NOT EXISTS expired_at timestamptz;
 ALTER TABLE releases ADD COLUMN IF NOT EXISTS cleaned_at timestamptz;
 ALTER TABLE releases ADD COLUMN IF NOT EXISTS manifest_ready boolean NOT NULL DEFAULT false;
+ALTER TABLE releases ADD COLUMN IF NOT EXISTS superseded boolean NOT NULL DEFAULT false;
+ALTER TABLE releases ADD COLUMN IF NOT EXISTS note text NOT NULL DEFAULT '';
+ALTER TABLE releases ADD COLUMN IF NOT EXISTS files_updated_at timestamptz;
 ALTER TABLE deployments ADD COLUMN IF NOT EXISTS files_cleaned_at timestamptz;
+ALTER TABLE deployments ADD COLUMN IF NOT EXISTS note text NOT NULL DEFAULT '';
+ALTER TABLE deployments ADD COLUMN IF NOT EXISTS replace_release_id text;
+ALTER TABLE deployments ADD COLUMN IF NOT EXISTS publish_now boolean;
 WITH numbered AS (
  SELECT r.id, COALESCE((SELECT max(old.version_number) FROM releases old WHERE old.project_id=r.project_id),0)
  + row_number() OVER (PARTITION BY r.project_id ORDER BY r.created_at,r.id) AS number
  FROM releases r WHERE r.version_number IS NULL
 ) UPDATE releases r SET version_number=n.number FROM numbered n WHERE r.id=n.id;
 ALTER TABLE releases ALTER COLUMN version_number SET NOT NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS release_project_version ON releases(project_id,version_number);
+CREATE UNIQUE INDEX IF NOT EXISTS release_project_version_live ON releases(project_id,version_number) WHERE NOT superseded;
+DROP INDEX IF EXISTS release_project_version;
 CREATE INDEX IF NOT EXISTS retained_release_lookup ON releases(project_id,version_number DESC) WHERE expired_at IS NULL;
 CREATE INDEX IF NOT EXISTS deployment_history_order ON deployments(project_id,created_at DESC,id DESC);
 CREATE INDEX IF NOT EXISTS failed_deployment_cleanup ON deployments(project_id,id) WHERE status='FAILED' AND files_cleaned_at IS NULL;

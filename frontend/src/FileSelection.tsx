@@ -1,5 +1,5 @@
 import React, {useEffect, useRef, useState} from 'react';
-import {collectDropped, selectionFromFiles, validateSelection, type Selection, type UploadLimits} from './upload-input';
+import {collectDropped, selectionFolder, selectionFromFiles, validateSelection, type Selection, type UploadLimits} from './upload-input';
 const mb=(n:number)=>n<1000?n+' B':n<1000000?(n/1000).toFixed(1)+' KB':(n/1000000).toFixed(1)+' MB';
 export function FileSelection({value,onChange,disabled,limits,onBusyChange}:{value:Selection|null;onChange:(value:Selection|null)=>void;disabled:boolean;limits:UploadLimits;onBusyChange?:(busy:boolean)=>void}){
  const folder=useRef<HTMLInputElement>(null),files=useRef<HTMLInputElement>(null),alive=useRef(true),reading=useRef(false);
@@ -8,8 +8,7 @@ export function FileSelection({value,onChange,disabled,limits,onBusyChange}:{val
  const locked=disabled||collecting;
  const selected=!!value?.items.length;
  const total=value?.items.reduce((sum,item)=>sum+item.file.size,0)||0;
- const root=value?.items[0]?.path.split('/')[0]||'';
- const folderName=value?.items.every(item=>item.path.startsWith(root+'/'))?root:'';
+ const folderName=selectionFolder(value);
  const selectionName=folderName|| (value?.items.length===1?value.items[0].file.name:'已选文件');
  async function accept(collect:()=>Promise<Selection>){
   if(disabled||reading.current)return;

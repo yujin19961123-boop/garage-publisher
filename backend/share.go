@@ -60,7 +60,7 @@ func (a *app) sharePageAPI(w http.ResponseWriter, r *http.Request, i identity) e
 		}
 	}
 	var count int
-	if e := a.db.QueryRow(ctx, "SELECT count(*) FROM projects WHERE owner_id=$1 AND current_release_id IS NOT NULL", i.ID).Scan(&count); e != nil {
+	if e := a.db.QueryRow(ctx, "SELECT count(*) FROM projects WHERE owner_id=$1 AND current_release_id IS NOT NULL AND NOT unpublished", i.ID).Scan(&count); e != nil {
 		return e
 	}
 	url := ""
@@ -135,7 +135,7 @@ func (a *app) publicSharePage(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/_share/"+slug+"/", 301)
 		return
 	}
-	rows, e := a.db.Query(r.Context(), `SELECT p.name,p.public_id,p.last_published_at FROM projects p LEFT JOIN project_list_preferences pref ON pref.user_id=$1 LEFT JOIN project_list_order o ON o.project_id=p.id AND o.user_id=$1 WHERE p.owner_id=$1 AND p.current_release_id IS NOT NULL ORDER BY CASE WHEN pref.mode='manual' THEN o.position END ASC NULLS FIRST,p.updated_at DESC,p.created_at DESC,p.id`, owner)
+	rows, e := a.db.Query(r.Context(), `SELECT p.name,p.public_id,p.last_published_at FROM projects p LEFT JOIN project_list_preferences pref ON pref.user_id=$1 LEFT JOIN project_list_order o ON o.project_id=p.id AND o.user_id=$1 WHERE p.owner_id=$1 AND p.current_release_id IS NOT NULL AND NOT p.unpublished ORDER BY CASE WHEN pref.mode='manual' THEN o.position END ASC NULLS FIRST,p.updated_at DESC,p.created_at DESC,p.id`, owner)
 	if e != nil {
 		http.Error(w, "暂时无法访问，请稍后重试", 503)
 		return

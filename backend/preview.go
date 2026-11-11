@@ -59,7 +59,7 @@ func (a *app) previewWithPrefix(w http.ResponseWriter, r *http.Request, public, 
 	}
 	var project string
 	var release, mode *string
-	e := a.db.QueryRow(r.Context(), "SELECT p.id,p.current_release_id,r.route_mode FROM projects p LEFT JOIN releases r ON r.id=p.current_release_id WHERE public_id=$1", public).Scan(&project, &release, &mode)
+	e := a.db.QueryRow(r.Context(), "SELECT p.id,p.current_release_id,r.route_mode FROM projects p LEFT JOIN releases r ON r.id=p.current_release_id WHERE p.public_id=$1 AND NOT p.unpublished", public).Scan(&project, &release, &mode)
 	if e != nil {
 		http.NotFound(w, r)
 		return

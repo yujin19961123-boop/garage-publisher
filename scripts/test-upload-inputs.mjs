@@ -14,6 +14,12 @@ assert.ok(unzipSync(new Uint8Array(await contentsArchive.arrayBuffer()))['index.
 assert.equal(await prepareArchive(contents,limits,()=>{}),contentsArchive);
 assert.equal(await prepareArchive(selectionFromFiles([wholeArchive]),limits,()=>{}),wholeArchive);
 validateSelection(selectionFromFiles([file('index.html'),file('download.zip')]),limits);
+const singleHtml=selectionFromFiles([file('原型演示.HTML','<!doctype html><h1>Standalone prototype</h1>')]);
+const singleArchive=await prepareArchive(singleHtml,limits,()=>{});
+const singleEntries=unzipSync(new Uint8Array(await singleArchive.arrayBuffer()));
+assert.deepEqual(Object.keys(singleEntries),['index.html']);
+assert.equal(new TextDecoder().decode(singleEntries['index.html']),'<!doctype html><h1>Standalone prototype</h1>');
+assert.equal(singleHtml.items[0].file.name,'原型演示.HTML');
 function fileEntry(path){return {name:path,isFile:true,isDirectory:false,file:(ok)=>ok(file(path)),createReader:()=>{throw Error('not directory');}};}
 function directory(name,batches){let calls=0;return {name,isFile:false,isDirectory:true,file:()=>{throw Error('not file');},createReader:()=>({readEntries:(ok)=>{calls++;ok(batches.shift()||[]);}}),calls:()=>calls};}
 const assets=directory('assets',[[fileEntry('app.js')],[]]);
@@ -26,10 +32,10 @@ validateSelection(dropped,limits);
 const assetContents=directory('assets',[[fileEntry('app.js')],[]]);
 const droppedContents=await collectDropped([{webkitGetAsEntry:()=>fileEntry('index.html'),getAsFile:()=>null},{webkitGetAsEntry:()=>assetContents,getAsFile:()=>null}],[],limits);
 assert.deepEqual(droppedContents.items.map(x=>x.path),['index.html','assets/app.js']);
-for(const invalid of [[],[file('index.html'),file('.env')],[file('../index.html')],[file('a/index.html'),file('b/index.html')],[file('index.html'),file('index.html')]]){
+for(const invalid of [[],[file('index.html'),file('.env')],[file('../index.html')],[file('a/index.html'),file('b/index.html')],[file('index.html'),file('index.html')],[file('原型.html','')],[file('dist/原型.html')],[file('原型.html'),file('style.css')]]){
  assert.throws(()=>validateSelection(selectionFromFiles(invalid),limits));
 }
 assert.throws(()=>validateSelection(selectionFromFiles([file('index.html','too big')]),{maxUploadBytes:100,maxExpandedBytes:2}));
 const controller=new AbortController();controller.abort();
 await assert.rejects(prepareArchive(contents,limits,()=>{},controller.signal));
-console.log('PASS: whole folder, contents, ZIP passthrough, ZIP resource, nested drag entries, multi-batch readers, unsafe/ambiguous inputs, limits and cancellation. No projects created.');
+console.log('PASS: standalone HTML, whole folder, contents, ZIP passthrough, ZIP resource, nested drag entries, multi-batch readers, unsafe/ambiguous inputs, limits and cancellation. No projects created.');

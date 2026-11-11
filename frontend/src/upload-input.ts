@@ -5,6 +5,18 @@ export type Selection={items:{path:string;file:File}[];archive?:File};
 export type Entry={isFile:boolean;isDirectory:boolean;name:string;file:(ok:(file:File)=>void,fail:(error:DOMException)=>void)=>void;createReader:()=>{readEntries:(ok:(entries:Entry[])=>void,fail:(error:DOMException)=>void)=>void}};
 const caches=new WeakMap<Selection,File>();
 const mb=(n:number)=>(n/1000000).toFixed(1)+' MB';
+
+export function standaloneHtml(selection:Selection|null){
+ if(selection?.items.length!==1)return undefined;
+ const item=selection.items[0];
+ if(item.path===item.file.name&&!item.path.includes('/')&&/\.html$/i.test(item.path))return item;
+}
+
+export function selectionFolder(selection:Selection|null){
+ const root=selection?.items[0]?.path.split('/')[0];
+ return root&&selection?.items.every(item=>item.path.startsWith(root+'/'))?root:'';
+}
+
 function safePath(path:string){
  if(!path||path.startsWith('/')||/[\\:\x00-\x1f]/.test(path)||path.split('/').some(p=>!p||p==='.'||p==='..')||path.split('/').length>21)throw new Error('文件路径无效，请重新选择完整的原型文件夹');
  if(path.split('/').some(p=>p.startsWith('.')&&p!=='.DS_Store'&&!p.startsWith('._')))throw new Error('不能上传 .env 等隐藏文件，请移除敏感文件后重新选择');
@@ -26,6 +38,7 @@ export function validateSelection(selection:Selection,limits:UploadLimits){
  for(const {file} of selection.items){if(file.size>(limits.maxFileBytes||100*1024*1024))throw new Error('单个文件太大，请缩小文件后重试');}
  if(!total)throw new Error('所选文件没有内容，请重新选择');
  if(total>limits.maxExpandedBytes)throw new Error('所选文件太大，文件总大小上限为 '+mb(limits.maxExpandedBytes));
+ if(standaloneHtml(selection))return;
  // Fail before creating a project when the selected content cannot have a web entry.
  let content=selection.items.map(x=>x.path).filter(p=>!p.split('/').some(s=>s==='__MACOSX'||s==='.DS_Store'||s.startsWith('._')));
  while(!content.includes('index.html')){
@@ -42,9 +55,11 @@ export async function prepareArchive(selection:Selection,limits:UploadLimits,onS
  const cached=caches.get(selection);if(cached)return cached;
  onStage('正在整理文件…');
  const files:Record<string,Uint8Array>=Object.create(null);
+ const html=standaloneHtml(selection);
  for(const item of selection.items){
   if(signal?.aborted)throw new Error('操作已结束');
-  files[item.path]=new Uint8Array(await item.file.arrayBuffer());
+  // Keep the published entry point consistent with folder and ZIP uploads.
+  files[item===html?'index.html':item.path]=new Uint8Array(await item.file.arrayBuffer());
  }
  if(signal?.aborted)throw new Error('操作已结束');
  onStage('正在准备上传，请稍候…');

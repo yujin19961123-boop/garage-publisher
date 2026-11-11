@@ -24,7 +24,7 @@ func (a *app) projectCollection(r *http.Request, i identity, id string) (project
 	if e != nil && !errors.Is(e, pgx.ErrNoRows) {
 		return result, e
 	}
-	rows, e := tx.Query(r.Context(), `SELECT p.id,p.public_id,p.owner_id,p.name,p.current_release_id,p.last_published_at,r.version_number,p.updated_at FROM projects p LEFT JOIN releases r ON r.id=p.current_release_id LEFT JOIN project_list_order o ON o.project_id=p.id AND o.user_id=$2 WHERE ($1='admin' OR p.owner_id=$2) AND ($3='' OR p.id=$3) ORDER BY CASE WHEN $4='manual' THEN o.position END ASC NULLS FIRST,p.updated_at DESC,p.created_at DESC,p.id`, i.Role, i.ID, id, result.SortMode)
+	rows, e := tx.Query(r.Context(), `SELECT p.id,p.public_id,p.owner_id,p.name,p.current_release_id,p.last_published_at,r.version_number,p.updated_at,p.unpublished FROM projects p LEFT JOIN releases r ON r.id=p.current_release_id LEFT JOIN project_list_order o ON o.project_id=p.id AND o.user_id=$2 WHERE ($1='admin' OR p.owner_id=$2) AND ($3='' OR p.id=$3) ORDER BY CASE WHEN $4='manual' THEN o.position END ASC NULLS FIRST,p.updated_at DESC,p.created_at DESC,p.id`, i.Role, i.ID, id, result.SortMode)
 	if e != nil {
 		return result, e
 	}
@@ -36,11 +36,12 @@ func (a *app) projectCollection(r *http.Request, i identity, id string) (project
 		var published *time.Time
 		var number *int
 		var updated time.Time
-		if e = rows.Scan(&pid, &pub, &owner, &n, &release, &published, &number, &updated); e != nil {
+		var unpublished bool
+		if e = rows.Scan(&pid, &pub, &owner, &n, &release, &published, &number, &updated, &unpublished); e != nil {
 			return result, e
 		}
 		status := "unpublished"
-		if release != nil {
+		if release != nil && !unpublished {
 			status = "published"
 		}
 		items = append(items, map[string]any{"id": pid, "publicId": pub, "ownerId": owner, "name": n, "status": status, "url": a.url(pub), "lastPublishedAt": published, "updatedAt": updated, "currentReleaseId": release, "currentVersionNumber": number})
@@ -125,6 +126,12 @@ func (a *app) projects(w http.ResponseWriter, r *http.Request, i identity, p []s
 	if len(p) == 5 && p[2] == "versions" && p[4] == "activate" && r.Method == "POST" {
 		return a.activateVersion(w, r, i, p[1], p[3])
 	}
+	if len(p) == 5 && p[2] == "versions" && p[4] == "publication" && r.Method == "PUT" {
+		return a.setVersionPublication(w, r, i, p[1], p[3])
+	}
+	if len(p) == 4 && p[2] == "versions" && r.Method == "PATCH" {
+		return a.editVersionNote(w, r, i, p[1], p[3])
+	}
 	if len(p) == 2 && r.Method == "DELETE" {
 		return a.deleteProject(w, r, i, p[1])
 	}
@@ -153,16 +160,29 @@ func (a *app) projects(w http.ResponseWriter, r *http.Request, i identity, p []s
 	}
 	if len(p) == 3 && p[2] == "deployments" && r.Method == "POST" {
 		var in struct {
-			RouteMode string `json:"routeMode"`
+			RouteMode        string  `json:"routeMode"`
+			Note             *string `json:"note"`
+			ReplaceReleaseID string  `json:"replaceReleaseId"`
+			PublishNow       *bool   `json:"publishNow"`
 		}
 		if e := body(r, &in); e != nil {
 			return e
 		}
-		if in.RouteMode == "" {
-			in.RouteMode = "spa"
+		if in.Note != nil {
+			note, err := validateVersionNote(*in.Note)
+			if err != nil {
+				return err
+			}
+			in.Note = &note
 		}
-		if in.RouteMode != "static" && in.RouteMode != "spa" {
+		if in.RouteMode != "" && in.RouteMode != "static" && in.RouteMode != "spa" {
 			return apiError{422, "INVALID_ROUTE_MODE", "不支持的路由模式"}
+		}
+		if in.ReplaceReleaseID != "" && !generatedID.MatchString(in.ReplaceReleaseID) {
+			return apiError{422, "INVALID_VERSION", "版本信息无效，请刷新后重试"}
+		}
+		if in.ReplaceReleaseID != "" && in.PublishNow != nil {
+			return apiError{422, "INVALID_PUBLISH_MODE", "仅创建新版本时可选择发布方式"}
 		}
 		id := token()
 		tx, e := a.db.Begin(ctx)
@@ -185,6 +205,31 @@ func (a *app) projects(w http.ResponseWriter, r *http.Request, i identity, p []s
 		if owner != i.ID {
 			return apiError{403, "FORBIDDEN", "无权操作此项目"}
 		}
+		var replacement *string
+		if in.ReplaceReleaseID == "" {
+			if e = checkNewVersionSlot(ctx, tx, p[1]); e != nil {
+				return e
+			}
+		} else {
+			replacement = &in.ReplaceReleaseID
+			var previousNote, previousMode string
+			e = tx.QueryRow(ctx, "SELECT note,route_mode FROM releases WHERE project_id=$1 AND id=$2 AND expired_at IS NULL", p[1], *replacement).Scan(&previousNote, &previousMode)
+			if errors.Is(e, pgx.ErrNoRows) {
+				return apiError{409, "VERSION_CHANGED", "该版本已更新或超出保留范围，请重新选择"}
+			}
+			if e != nil {
+				return e
+			}
+			if in.Note == nil {
+				in.Note = &previousNote
+			}
+			if in.RouteMode == "" {
+				in.RouteMode = previousMode
+			}
+		}
+		if in.RouteMode == "" {
+			in.RouteMode = "spa"
+		}
 		var cleanupPending bool
 		if e = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM version_cleanup_jobs WHERE project_id=$1)", p[1]).Scan(&cleanupPending); e != nil {
 			return e
@@ -192,7 +237,7 @@ func (a *app) projects(w http.ResponseWriter, r *http.Request, i identity, p []s
 		if cleanupPending {
 			return apiError{409, "CLEANUP_PENDING", "旧文件正在清理，请稍后再上传；已有版本仍可查看和切换"}
 		}
-		_, e = tx.Exec(ctx, "INSERT INTO deployments(id,project_id,operator_id,status,route_mode) VALUES($1,$2,$3,'UPLOADING',$4)", id, p[1], i.ID, in.RouteMode)
+		_, e = tx.Exec(ctx, "INSERT INTO deployments(id,project_id,operator_id,status,route_mode,note,replace_release_id,publish_now) VALUES($1,$2,$3,'UPLOADING',$4,COALESCE($5::text,''),$6,$7)", id, p[1], i.ID, in.RouteMode, in.Note, replacement, in.PublishNow)
 		if e != nil {
 			var pe *pgconn.PgError
 			if errors.As(e, &pe) && pe.Code == "23505" {

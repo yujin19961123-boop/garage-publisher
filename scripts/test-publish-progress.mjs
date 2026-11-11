@@ -7,6 +7,7 @@ const require=createRequire(new URL('../frontend/package.json',import.meta.url))
 const {chromium}=require('playwright');
 const output=fileURLToPath(new URL('../.local/',import.meta.url));mkdirSync(output,{recursive:true});
 const origin='http://console.localhost:8080',steps=[];
+const folderFixture=fileURLToPath(new URL('../frontend/dist',import.meta.url));
 const browser=await chromium.launch({channel:'chrome',headless:true});
 try{
  const context=await browser.newContext({viewport:{width:1156,height:1004},serviceWorkers:'block'});
@@ -21,7 +22,8 @@ try{
   const reply=body=>route.fulfill({contentType:'application/json',body:JSON.stringify(body)});
   if(url.pathname==='/api/v1/me')return reply({user});
   if(url.pathname==='/api/v1/platform-config')return reply({maxUploadBytes:104857600,maxExpandedBytes:524288000,maxFiles:10000});
-  if(url.pathname==='/api/v1/projects'&&req.method()==='POST'){created={...project,id:'created-progress',name:'新原型'};return reply(created);}
+  if(url.pathname==='/api/v1/projects/progress-project/versions')return reply({items:[],currentReleaseId:'r1',busy:false,cleanupPending:false,retentionLimit:5});
+  if(url.pathname==='/api/v1/projects'&&req.method()==='POST'){created={...project,id:'created-progress',name:req.postDataJSON().name};return reply(created);}
   if(url.pathname==='/api/v1/projects')return reply({items:created?[project,created]:[project]});
   if(url.pathname.match(/^\/api\/v1\/projects\/[^/]+\/deployments$/)){deployments++;return reply({id:'upload-'+deployments,status:'UPLOADING'});}
   if(url.pathname.startsWith('/api/v1/deployments/'))return reply({id:url.pathname.split('/').at(-1),status,...(status==='FAILED'?{errorMessage:'测试：文件检查失败'}:{})});
@@ -44,7 +46,7 @@ try{
  await page.goto(origin);await page.getByRole('button',{name:'发布更新',exact:true}).waitFor();
  const dialog=page.getByRole('dialog');
  const input=()=>dialog.getByLabel('选择原型文件或 ZIP', {exact:true});
- const select=()=>input().setInputFiles({name:'index.html',mimeType:'text/html',buffer:Buffer.from('<!doctype html><h1>Prototype</h1>')});
+ const select=(name='index.html')=>input().setInputFiles({name,mimeType:'text/html',buffer:Buffer.from('<!doctype html><h1>Prototype</h1>')});
  const bar=()=>dialog.getByRole('progressbar');
  const title=text=>dialog.getByRole('status').filter({hasText:text}).waitFor();
  const progress=async n=>{await page.evaluate(n=>window.__upload.upload.onprogress?.({lengthComputable:true,loaded:n,total:100}),n);await page.waitForFunction(n=>document.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')===String(n),n);};
@@ -105,13 +107,31 @@ try{
  pass('upload failure restores the selected file and retry; retry starts a fresh progress state and reaches success');
 
  await page.getByRole('button',{name:'创建项目',exact:true}).first().click();
- await dialog.getByRole('textbox',{name:'项目名称',exact:true}).fill('新原型');await select();
+ const projectName=dialog.getByRole('textbox',{name:'项目名称',exact:true});
+ const note=dialog.getByRole('textbox',{name:/版本备注/});
+ await dialog.getByLabel('选择原型文件夹',{exact:true}).setInputFiles(folderFixture);
+ await dialog.getByText('dist',{exact:true}).waitFor();
+ assert.equal(await projectName.getAttribute('placeholder'),'dist');
+ await projectName.press('Tab');assert.equal(await projectName.inputValue(),'dist');
+ await projectName.fill('');
+ await select('新原型.HTML');
+ await dialog.getByText('新原型.HTML',{exact:true}).waitFor();
+ assert.equal(await projectName.getAttribute('placeholder'),'新原型');
+ assert.equal(await projectName.inputValue(),'');
+ await projectName.press('Shift+Tab');assert.equal(await projectName.inputValue(),'');
+ await projectName.press('Tab');assert.equal(await projectName.inputValue(),'新原型');
+ assert.equal(await note.evaluate(el=>el===document.activeElement),true);
+ await projectName.fill('自定义名称');
+ await select('另一份.html');
+ await dialog.getByText('另一份.html',{exact:true}).waitFor();
+ await projectName.press('Tab');assert.equal(await projectName.inputValue(),'自定义名称');
  await page.evaluate(()=>window.__upload=null);status='UPLOADING';
  await dialog.getByRole('button',{name:'创建并发布',exact:true}).click();await page.waitForFunction(()=>!!window.__upload);
  await progress(63);assert.equal(await bar().getAttribute('aria-valuenow'),'63');
  status='QUEUED';await finish();await title('等待发布处理');
  status='SUCCEEDED';await dialog.getByRole('heading',{name:'发布成功。',exact:true}).waitFor();
- assert.equal(await bar().count(),0);assert.equal(deployments,4);assert.deepEqual(errors,[]);
+ assert.equal(await bar().count(),0);assert.equal(deployments,4);assert.equal(created.name,'自定义名称');assert.deepEqual(errors,[]);
+ pass('folders and standalone HTML suggest their names, accept with Tab, and preserve a custom name after reselection');
  pass('first publication shares the same progress UI and keeps the dedicated success result');
  writeFileSync(output+'publish-progress-report.json',JSON.stringify({success:true,simulatedAPIs:true,noDataWrites:true,steps},null,2));
 }finally{await browser.close();}

@@ -12,12 +12,25 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 )
 
 const retainedVersions = 5
 const activeDeploymentSQL = "SELECT EXISTS(SELECT 1 FROM deployments WHERE project_id=$1 AND status IN ('UPLOADING','QUEUED','VALIDATING','PREPARING'))"
+
+// Call while holding the project row lock, as for all publication writes.
+func checkNewVersionSlot(ctx context.Context, tx pgx.Tx, pid string) error {
+	var count int
+	if err := tx.QueryRow(ctx, "SELECT count(*) FROM releases WHERE project_id=$1 AND expired_at IS NULL", pid).Scan(&count); err != nil {
+		return err
+	}
+	if count >= retainedVersions {
+		return apiError{409, "VERSION_LIMIT_REACHED", fmt.Sprintf("已达到 %d 个版本上限，请选择已有版本覆盖", retainedVersions)}
+	}
+	return nil
+}
 
 // All writes to publication state and file collection take the project row lock.
 func lockVersionProject(ctx context.Context, tx pgx.Tx, pid, uid string) (*string, error) {
@@ -36,6 +49,18 @@ func lockVersionProject(ctx context.Context, tx pgx.Tx, pid, uid string) (*strin
 	return current, nil
 }
 
+func lockVersionOwner(ctx context.Context, tx pgx.Tx, pid, uid string) (*string, error) {
+	// Use the same user -> project lock order as the publication worker.
+	var state string
+	if err := tx.QueryRow(ctx, "SELECT status FROM users WHERE id=$1 FOR UPDATE", uid).Scan(&state); err != nil {
+		return nil, err
+	}
+	if state != "active" {
+		return nil, apiError{401, "UNAUTHENTICATED", "账号已停用，请重新登录"}
+	}
+	return lockVersionProject(ctx, tx, pid, uid)
+}
+
 func (a *app) versionList(w http.ResponseWriter, r *http.Request, i identity, pid string) error {
 	tx, e := a.db.Begin(r.Context())
 	if e != nil {
@@ -46,14 +71,17 @@ func (a *app) versionList(w http.ResponseWriter, r *http.Request, i identity, pi
 	if e != nil {
 		return e
 	}
-	var busy, pending bool
+	var busy, pending, published bool
+	if e = tx.QueryRow(r.Context(), "SELECT current_release_id IS NOT NULL AND NOT unpublished FROM projects WHERE id=$1", pid).Scan(&published); e != nil {
+		return e
+	}
 	if e = tx.QueryRow(r.Context(), activeDeploymentSQL, pid).Scan(&busy); e != nil {
 		return e
 	}
 	if e = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM version_cleanup_jobs WHERE project_id=$1)", pid).Scan(&pending); e != nil {
 		return e
 	}
-	rows, e := tx.Query(r.Context(), "SELECT id,version_number,created_at FROM releases WHERE project_id=$1 AND expired_at IS NULL ORDER BY version_number DESC", pid)
+	rows, e := tx.Query(r.Context(), "SELECT id,version_number,created_at,COALESCE(files_updated_at,created_at),note FROM releases WHERE project_id=$1 AND expired_at IS NULL ORDER BY version_number DESC", pid)
 	if e != nil {
 		return e
 	}
@@ -61,8 +89,9 @@ func (a *app) versionList(w http.ResponseWriter, r *http.Request, i identity, pi
 	for rows.Next() {
 		var id string
 		var number int
-		var created time.Time
-		if e = rows.Scan(&id, &number, &created); e != nil {
+		var created, updated time.Time
+		var note string
+		if e = rows.Scan(&id, &number, &created, &updated, &note); e != nil {
 			rows.Close()
 			return e
 		}
@@ -72,14 +101,64 @@ func (a *app) versionList(w http.ResponseWriter, r *http.Request, i identity, pi
 		if !available {
 			state = "missing"
 		}
-		items = append(items, map[string]any{"id": id, "versionNumber": number, "createdAt": created, "isCurrent": isCurrent, "canActivate": available && !isCurrent && !busy, "filesState": state})
+		items = append(items, map[string]any{"id": id, "versionNumber": number, "createdAt": created, "filesUpdatedAt": updated, "note": note, "isCurrent": isCurrent, "canActivate": available && !isCurrent && !busy, "filesState": state})
 	}
 	e = rows.Err()
 	rows.Close()
 	if e != nil {
 		return e
 	}
-	write(w, map[string]any{"items": items, "currentReleaseId": current, "busy": busy, "cleanupPending": pending, "retentionLimit": retainedVersions})
+	write(w, map[string]any{"items": items, "currentReleaseId": current, "published": published, "busy": busy, "cleanupPending": pending, "retentionLimit": retainedVersions})
+	return nil
+}
+
+func validateVersionNote(note string) (string, error) {
+	note = strings.TrimSpace(note)
+	if utf8.RuneCountInString(note) > 500 || strings.ContainsRune(note, 0) {
+		return "", apiError{422, "INVALID_NOTE", "版本备注最多 500 字，且不能包含空字符"}
+	}
+	return note, nil
+}
+
+func (a *app) editVersionNote(w http.ResponseWriter, r *http.Request, i identity, pid, rid string) error {
+	var in struct{ Note *string }
+	if err := body(r, &in); err != nil {
+		return err
+	}
+	if in.Note == nil || !generatedID.MatchString(rid) {
+		return apiError{422, "INVALID_INPUT", "版本信息或备注无效"}
+	}
+	note, err := validateVersionNote(*in.Note)
+	if err != nil {
+		return err
+	}
+	ctx := r.Context()
+	tx, err := a.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err = lockVersionProject(ctx, tx, pid, i.ID); err != nil {
+		return err
+	}
+	var busy bool
+	if err = tx.QueryRow(ctx, activeDeploymentSQL, pid).Scan(&busy); err != nil {
+		return err
+	}
+	if busy {
+		return apiError{409, "DEPLOYMENT_BUSY", "这个项目正在发布，请完成后再编辑"}
+	}
+	result, err := tx.Exec(ctx, "UPDATE releases SET note=$3 WHERE project_id=$1 AND id=$2 AND expired_at IS NULL", pid, rid, note)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() != 1 {
+		return apiError{409, "VERSION_CHANGED", "该版本已更新或超出保留范围，请刷新后重试"}
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return err
+	}
+	write(w, map[string]any{"note": note})
 	return nil
 }
 
@@ -107,8 +186,10 @@ func (a *app) readDeploymentHistory(w http.ResponseWriter, r *http.Request, pid 
 	if !cursor.Created.IsZero() {
 		before = &cursor.Created
 	}
-	rows, e := a.db.Query(r.Context(), `SELECT d.id,d.status,d.error_message,d.created_at,d.updated_at,r.id,r.version_number,r.expired_at,r.cleaned_at,p.current_release_id
+	rows, e := a.db.Query(r.Context(), `SELECT d.id,d.status,d.error_message,d.created_at,d.updated_at,r.id,COALESCE(r.version_number,target.version_number),r.expired_at,r.cleaned_at,p.current_release_id,
+ COALESCE(r.note,d.note),r.created_at,COALESCE(r.files_updated_at,r.created_at),COALESCE(r.superseded,false),d.replace_release_id IS NOT NULL,d.publish_now IS FALSE
  FROM deployments d JOIN projects p ON p.id=d.project_id LEFT JOIN releases r ON r.deployment_id=d.id
+ LEFT JOIN releases target ON target.id=d.replace_release_id AND target.project_id=d.project_id
  WHERE d.project_id=$1 AND ($2::timestamptz IS NULL OR (d.created_at,d.id)<($2::timestamptz,$3::text)) ORDER BY d.created_at DESC,d.id DESC LIMIT 21`, pid, before, cursor.ID)
 	if e != nil {
 		return e
@@ -118,12 +199,14 @@ func (a *app) readDeploymentHistory(w http.ResponseWriter, r *http.Request, pid 
 	var next *string
 	var last historyCursor
 	for rows.Next() {
-		var id, status, msg string
+		var id, status, msg, note string
 		var created, updated time.Time
 		var release, current *string
 		var number *int
 		var expired, cleaned *time.Time
-		if e = rows.Scan(&id, &status, &msg, &created, &updated, &release, &number, &expired, &cleaned, &current); e != nil {
+		var uploaded, filesUpdated *time.Time
+		var superseded, replacement, savedOnly bool
+		if e = rows.Scan(&id, &status, &msg, &created, &updated, &release, &number, &expired, &cleaned, &current, &note, &uploaded, &filesUpdated, &superseded, &replacement, &savedOnly); e != nil {
 			return e
 		}
 		if len(items) == 20 {
@@ -146,7 +229,7 @@ func (a *app) readDeploymentHistory(w http.ResponseWriter, r *http.Request, pid 
 			}
 			state = &value
 		}
-		items = append(items, map[string]any{"id": id, "status": status, "errorMessage": msg, "createdAt": created, "updatedAt": updated, "releaseId": release, "versionNumber": number, "filesState": state, "isCurrent": release != nil && current != nil && *release == *current})
+		items = append(items, map[string]any{"id": id, "status": status, "errorMessage": msg, "createdAt": created, "updatedAt": updated, "releaseId": release, "versionNumber": number, "filesState": state, "isCurrent": release != nil && current != nil && *release == *current, "note": note, "uploadedAt": uploaded, "filesUpdatedAt": filesUpdated, "superseded": superseded, "replacement": replacement, "savedOnly": savedOnly})
 		last = historyCursor{created, id}
 	}
 	if e = rows.Err(); e != nil {
@@ -172,15 +255,7 @@ func (a *app) activateVersion(w http.ResponseWriter, r *http.Request, i identity
 		return e
 	}
 	defer tx.Rollback(ctx)
-	// Same user -> project lock order as the publication worker and account changes.
-	var state string
-	if e = tx.QueryRow(ctx, "SELECT status FROM users WHERE id=$1 FOR UPDATE", i.ID).Scan(&state); e != nil {
-		return e
-	}
-	if state != "active" {
-		return apiError{401, "UNAUTHENTICATED", "账号已停用，请重新登录"}
-	}
-	current, e := lockVersionProject(ctx, tx, pid, i.ID)
+	current, e := lockVersionOwner(ctx, tx, pid, i.ID)
 	if e != nil {
 		return e
 	}
@@ -210,32 +285,105 @@ func (a *app) activateVersion(w http.ResponseWriter, r *http.Request, i identity
 		if e = validateVersionFiles(a.data, pid, rid); e != nil {
 			return apiError{409, "VERSION_UNAVAILABLE", "版本文件不完整，无法切换；当前版本保持不变"}
 		}
-		if _, e = tx.Exec(ctx, "UPDATE projects SET current_release_id=$2,last_published_at=now(),updated_at=clock_timestamp() WHERE id=$1", pid, rid); e != nil {
+		if _, e = tx.Exec(ctx, "UPDATE projects SET current_release_id=$2,last_published_at=CASE WHEN unpublished THEN last_published_at ELSE now() END,updated_at=clock_timestamp() WHERE id=$1", pid, rid); e != nil {
 			return e
 		}
 		if _, e = tx.Exec(ctx, "INSERT INTO audit_logs(actor_id,action,target_id) VALUES($1,'activate_version',$2)", i.ID, rid); e != nil {
 			return e
 		}
 	}
-	var published *time.Time
-	if e = tx.QueryRow(ctx, "SELECT last_published_at FROM projects WHERE id=$1", pid).Scan(&published); e != nil {
+	var lastPublished *time.Time
+	var published bool
+	if e = tx.QueryRow(ctx, "SELECT last_published_at,NOT unpublished FROM projects WHERE id=$1", pid).Scan(&lastPublished, &published); e != nil {
 		return e
 	}
 	if e = tx.Commit(ctx); e != nil {
 		return e
 	}
-	write(w, map[string]any{"ok": true, "currentReleaseId": rid, "currentVersionNumber": number, "lastPublishedAt": published})
+	write(w, map[string]any{"ok": true, "currentReleaseId": rid, "currentVersionNumber": number, "lastPublishedAt": lastPublished, "published": published})
+	return nil
+}
+
+func (a *app) setVersionPublication(w http.ResponseWriter, r *http.Request, i identity, pid, rid string) error {
+	var in struct {
+		Published *bool `json:"published"`
+	}
+	if err := body(r, &in); err != nil {
+		return err
+	}
+	if in.Published == nil || !generatedID.MatchString(rid) {
+		return apiError{422, "INVALID_INPUT", "发布状态或版本无效"}
+	}
+	ctx := r.Context()
+	tx, err := a.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	current, err := lockVersionOwner(ctx, tx, pid, i.ID)
+	if err != nil {
+		return err
+	}
+	if current == nil || *current != rid {
+		return apiError{409, "VERSION_CHANGED", "只能操作当前版本，请刷新版本记录后重试"}
+	}
+	var busy bool
+	if err = tx.QueryRow(ctx, activeDeploymentSQL, pid).Scan(&busy); err != nil {
+		return err
+	}
+	if busy {
+		return apiError{409, "DEPLOYMENT_BUSY", "项目正在处理上传，请完成后再修改发布状态"}
+	}
+	var number int
+	var lastPublished *time.Time
+	var published bool
+	err = tx.QueryRow(ctx, `SELECT r.version_number,p.last_published_at,NOT p.unpublished FROM projects p
+ JOIN releases r ON r.id=p.current_release_id AND r.project_id=p.id
+ WHERE p.id=$1 AND r.expired_at IS NULL`, pid).Scan(&number, &lastPublished, &published)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return apiError{409, "VERSION_UNAVAILABLE", "当前版本已不可用"}
+	}
+	if err != nil {
+		return err
+	}
+	if published != *in.Published {
+		published = *in.Published
+		action := "unpublish_version"
+		if published {
+			if err = validateVersionFiles(a.data, pid, rid); err != nil {
+				return apiError{409, "VERSION_UNAVAILABLE", "版本文件不完整，无法发布，请先覆盖更新"}
+			}
+			action = "publish_version"
+		}
+		err = tx.QueryRow(ctx, `UPDATE projects SET unpublished=NOT $2::boolean,
+ last_published_at=CASE WHEN $2::boolean THEN now() ELSE last_published_at END,updated_at=clock_timestamp()
+ WHERE id=$1 RETURNING last_published_at`, pid, published).Scan(&lastPublished)
+		if err != nil {
+			return err
+		}
+		if _, err = tx.Exec(ctx, "INSERT INTO audit_logs(actor_id,action,target_id) VALUES($1,$2,$3)", i.ID, action, rid); err != nil {
+			return err
+		}
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return err
+	}
+	write(w, map[string]any{"ok": true, "currentReleaseId": rid, "currentVersionNumber": number, "lastPublishedAt": lastPublished, "published": published})
 	return nil
 }
 
 func expireVersions(ctx context.Context, tx pgx.Tx, pid string) error {
 	_, e := tx.Exec(ctx, `UPDATE releases SET expired_at=now() WHERE project_id=$1 AND expired_at IS NULL AND id IN (
  SELECT r.id FROM releases r JOIN projects p ON p.id=r.project_id WHERE r.project_id=$1 AND r.expired_at IS NULL
- ORDER BY (r.id IS NOT DISTINCT FROM p.current_release_id) DESC,r.version_number DESC OFFSET 5)`, pid)
+ ORDER BY (r.id IS NOT DISTINCT FROM p.current_release_id) DESC,r.version_number DESC OFFSET $2)`, pid, retainedVersions)
 	if e != nil {
 		return e
 	}
-	_, e = tx.Exec(ctx, `INSERT INTO version_cleanup_jobs(deployment_id,project_id)
+	return queueExpiredVersions(ctx, tx, pid)
+}
+
+func queueExpiredVersions(ctx context.Context, tx pgx.Tx, pid string) error {
+	_, e := tx.Exec(ctx, `INSERT INTO version_cleanup_jobs(deployment_id,project_id)
  SELECT deployment_id,project_id FROM releases WHERE project_id=$1 AND expired_at IS NOT NULL AND cleaned_at IS NULL ON CONFLICT DO NOTHING`, pid)
 	return e
 }
@@ -248,8 +396,8 @@ func (a *app) reconcileVersions(ctx context.Context, db cleanupDB) error {
 		return e
 	}
 	defer tx.Rollback(ctx)
-	rows, e := tx.Query(ctx, `SELECT p.id FROM projects p WHERE (SELECT count(*) FROM releases r WHERE r.project_id=p.id AND expired_at IS NULL)>5
- OR EXISTS(SELECT 1 FROM releases r WHERE r.project_id=p.id AND NOT manifest_ready AND expired_at IS NULL) ORDER BY p.id FOR UPDATE`)
+	rows, e := tx.Query(ctx, `SELECT p.id FROM projects p WHERE (SELECT count(*) FROM releases r WHERE r.project_id=p.id AND expired_at IS NULL)>$1
+ OR EXISTS(SELECT 1 FROM releases r WHERE r.project_id=p.id AND NOT manifest_ready AND expired_at IS NULL) ORDER BY p.id FOR UPDATE`, retainedVersions)
 	if e != nil {
 		return e
 	}

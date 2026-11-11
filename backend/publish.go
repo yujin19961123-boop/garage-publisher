@@ -16,6 +16,8 @@ import (
 
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 const (
@@ -201,7 +203,12 @@ func (a *app) deploymentAPI(w http.ResponseWriter, r *http.Request, i identity, 
 	}
 	ctx := r.Context()
 	var project, status, msg string
-	e := a.db.QueryRow(ctx, "SELECT project_id,status,error_message FROM deployments WHERE id=$1", p[1]).Scan(&project, &status, &msg)
+	var number *int
+	var replacement, current, savedOnly, projectPublished bool
+	e := a.db.QueryRow(ctx, `SELECT d.project_id,d.status,d.error_message,r.version_number,d.replace_release_id IS NOT NULL,
+ COALESCE(r.id=p.current_release_id,false),d.publish_now IS FALSE,p.current_release_id IS NOT NULL AND NOT p.unpublished
+ FROM deployments d JOIN projects p ON p.id=d.project_id
+ LEFT JOIN releases r ON r.deployment_id=d.id WHERE d.id=$1`, p[1]).Scan(&project, &status, &msg, &number, &replacement, &current, &savedOnly, &projectPublished)
 	if e != nil {
 		return apiError{404, "NOT_FOUND", "任务不存在"}
 	}
@@ -209,7 +216,7 @@ func (a *app) deploymentAPI(w http.ResponseWriter, r *http.Request, i identity, 
 		return e
 	}
 	if len(p) == 2 && r.Method == "GET" {
-		write(w, map[string]any{"id": p[1], "status": status, "errorMessage": msg})
+		write(w, map[string]any{"id": p[1], "status": status, "errorMessage": msg, "versionNumber": number, "replacement": replacement, "isCurrent": current, "savedOnly": savedOnly, "projectPublished": projectPublished})
 		return nil
 	}
 	if len(p) != 3 || p[2] != "archive" || r.Method != "PUT" {
@@ -264,6 +271,80 @@ func (a *app) deploymentAPI(w http.ResponseWriter, r *http.Request, i identity, 
 	write(w, map[string]any{"id": p[1], "status": "QUEUED"})
 	return nil
 }
+func commitPreparedRelease(ctx context.Context, tx pgx.Tx, id, pid, uid, mode string) error {
+	var state string
+	if err := tx.QueryRow(ctx, "SELECT status FROM users WHERE id=$1 FOR UPDATE", uid).Scan(&state); err != nil {
+		return err
+	}
+	if state != "active" {
+		return fmt.Errorf("账号已停用，无法发布")
+	}
+	if _, err := lockVersionProject(ctx, tx, pid, uid); err != nil {
+		return err
+	}
+	var note string
+	var replacement *string
+	var publishNow *bool
+	err := tx.QueryRow(ctx, "SELECT note,replace_release_id,publish_now FROM deployments WHERE id=$1 AND project_id=$2 AND status='PREPARING'", id, pid).Scan(&note, &replacement, &publishNow)
+	if err != nil {
+		return err
+	}
+	action := "publish"
+	if replacement == nil {
+		if err = checkNewVersionSlot(ctx, tx, pid); err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, `INSERT INTO releases(id,project_id,deployment_id,route_mode,version_number,manifest_ready,note)
+ SELECT $1,$2,$1,$3,COALESCE(max(version_number),0)+1,true,$4 FROM releases WHERE project_id=$2`, id, pid, mode, note)
+	} else {
+		action = "replace_version"
+		var number int
+		var firstUpload time.Time
+		// The new directory is already prepared. Keep the previous release row
+		// for history and let the normal cleanup queue collect its files.
+		err = tx.QueryRow(ctx, `UPDATE releases SET expired_at=clock_timestamp(),superseded=true
+ WHERE id=$1 AND project_id=$2 AND expired_at IS NULL RETURNING version_number,created_at`, *replacement, pid).Scan(&number, &firstUpload)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("目标版本已变化，请重新选择后上传")
+		}
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, `INSERT INTO releases(id,project_id,deployment_id,route_mode,version_number,manifest_ready,note,created_at,files_updated_at)
+ VALUES($1,$2,$1,$3,$4,true,$5,$6,clock_timestamp())`, id, pid, mode, number, note, firstUpload)
+	}
+	if err != nil {
+		return err
+	}
+	switch {
+	case replacement == nil && publishNow != nil && !*publishNow:
+		action = "save_version"
+		// The first saved version needs a current pointer so the owner can publish it later.
+		_, err = tx.Exec(ctx, `UPDATE projects SET current_release_id=$1,unpublished=true,updated_at=clock_timestamp()
+ WHERE id=$2 AND current_release_id IS NULL`, id, pid)
+	case replacement == nil && publishNow != nil:
+		_, err = tx.Exec(ctx, `UPDATE projects SET current_release_id=$1,unpublished=false,last_published_at=now(),updated_at=clock_timestamp()
+ WHERE id=$2`, id, pid)
+	default:
+		// Preserve visibility for legacy uploads and keep historical overwrites off the live URL.
+		_, err = tx.Exec(ctx, `UPDATE projects SET current_release_id=$1,last_published_at=CASE WHEN unpublished THEN last_published_at ELSE now() END,updated_at=clock_timestamp()
+ WHERE id=$2 AND ($3::text IS NULL OR current_release_id=$3)`, id, pid, replacement)
+	}
+	if err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, "UPDATE deployments SET status='SUCCEEDED',updated_at=now() WHERE id=$1", id); err != nil {
+		return err
+	}
+	if replacement != nil {
+		if err = queueExpiredVersions(ctx, tx, pid); err != nil {
+			return err
+		}
+	}
+	_, err = tx.Exec(ctx, "INSERT INTO audit_logs(actor_id,action,target_id) VALUES($1,$2,$3)", uid, action, pid)
+	return err
+}
+
 func (a *app) worker(ctx context.Context) {
 	for {
 		func() {
@@ -332,29 +413,7 @@ func (a *app) worker(ctx context.Context) {
 					if te != nil {
 						e = te
 					} else {
-						var state, owner string
-						te = tx.QueryRow(ctx, "SELECT status FROM users WHERE id=$1 FOR UPDATE", uid).Scan(&state)
-						if te == nil {
-							te = tx.QueryRow(ctx, "SELECT owner_id FROM projects WHERE id=$1 FOR UPDATE", pid).Scan(&owner)
-						}
-						if te == nil && (state != "active" || owner != uid) {
-							te = fmt.Errorf("账号已停用或项目权限已变更")
-						}
-						if te == nil {
-							_, te = tx.Exec(ctx, "INSERT INTO releases(id,project_id,deployment_id,route_mode,version_number,manifest_ready) SELECT $1,$2,$1,$3,COALESCE(max(version_number),0)+1,true FROM releases WHERE project_id=$2", id, pid, mode)
-						}
-						if te == nil {
-							_, te = tx.Exec(ctx, "UPDATE projects SET current_release_id=$1,last_published_at=now(),updated_at=clock_timestamp() WHERE id=$2", id, pid)
-						}
-						if te == nil {
-							_, te = tx.Exec(ctx, "UPDATE deployments SET status='SUCCEEDED',updated_at=now() WHERE id=$1", id)
-						}
-						if te == nil {
-							te = expireVersions(ctx, tx, pid)
-						}
-						if te == nil {
-							_, te = tx.Exec(ctx, "INSERT INTO audit_logs(actor_id,action,target_id) VALUES($1,'publish',$2)", uid, pid)
-						}
+						te = commitPreparedRelease(ctx, tx, id, pid, uid, mode)
 						if te == nil {
 							te = tx.Commit(ctx)
 						} else {
