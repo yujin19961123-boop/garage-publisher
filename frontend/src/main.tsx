@@ -449,7 +449,7 @@ function ShareAllModal({isAdmin,onClose}:{isAdmin:boolean;onClose:()=>void}){
   {loading&&<p role="status" className="task-state">正在获取链接…</p>}
   {error&&<div className="alert" role="alert">{error}</div>}{notice&&<div className="success" role="status">{notice}</div>}
   {!loading&&page&&<>
-   <div className="share-total"><strong>{String(page.publishedCount).padStart(2,'0')}</strong><span>个已发布原型</span></div>
+   <div className="share-total"><strong>{page.publishedCount}</strong><span>个已发布原型</span></div>
    {page.publishedCount===0&&<p className="small muted">发布后会自动加入这个分享页。</p>}
    <label>固定分享链接<input aria-label="全部原型分享链接" readOnly value={page.url} onFocus={e=>e.currentTarget.select()}/></label>
    <div className="share-actions"><button data-pointer-surface="button" className="primary" onClick={copyShare}>复制链接</button><a href={page.url} target="_blank" rel="noopener noreferrer">打开分享页<ActionIcon name="external"/></a></div>

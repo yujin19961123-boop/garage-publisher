@@ -221,20 +221,22 @@ svg { display: block; max-width: 100%; }
   background: none;
   line-height: 1;
 }
+.project .project-status:is(.published, .unpublished) {
+  box-shadow: 0 2px 7px #48665318;
+}
 .project .project-status.published {
   color: #fffef7;
   background: #486653;
   border-color: #486653;
-  box-shadow: 0 2px 7px #48665318;
 }
 .project .project-status.published::before { content: '✓'; font-size: 14px; font-weight: 800; }
-.project:first-child .project-status.published { border-color: #dce9d7a6; }
 .project .project-status.unpublished {
-  color: #776c60;
-  background: #f8f4ed;
-  border: 1.5px dashed #ad9f8d;
+  color: #4f6354;
+  background: #edf1e8;
+  border-color: #879b89;
 }
 .project .project-status.unpublished::before { width: 9px; height: 9px; margin-inline: 3px; border: 1.5px solid currentColor; border-radius: 50%; }
+.project:first-child .project-status:is(.published, .unpublished) { border-color: #dce9d7a6; }
 .project .project-status.processing { color: #625873; background: #eee8f3; border-color: #b8abc4; }
 .project .project-status.processing::before { content: '↻'; font-size: 18px; }
 .project-body { flex: 1; }
