@@ -162,7 +162,10 @@ func (a pathAdapter) javascript(data []byte) ([]byte, error) {
 		return nil, fmt.Errorf("网页脚本无法适配，请重新导出完整静态网页后上传")
 	}
 	v := &jsAdapter{a: a}
-	v.changed = adaptVitePreloader(ast, data, a.prefix)
+	v.changed = adaptPathnameChecks(ast, a)
+	if adaptVitePreloader(ast, data, a.prefix) {
+		v.changed = true
+	}
 	if adaptNextRuntime(ast, data, a.prefix) {
 		v.changed = true
 	}

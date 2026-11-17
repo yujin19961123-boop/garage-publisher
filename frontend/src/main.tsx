@@ -37,7 +37,7 @@ async function api<T>(path:string, method='GET', data?:unknown,signal?:AbortSign
 function upload(id:string,file:File,onProgress:(n:number)=>void,signal?:AbortSignal):Promise<void>{return new Promise((resolve,reject)=>{const xhr=new XMLHttpRequest();xhr.open('PUT',`/api/v1/deployments/${id}/archive`);xhr.setRequestHeader('Content-Type','application/zip');if(csrfToken)xhr.setRequestHeader('X-CSRF-Token',csrfToken);xhr.upload.onprogress=e=>{if(e.lengthComputable)onProgress(Math.round(e.loaded/e.total*100));};xhr.onload=()=>{if(xhr.status>=200&&xhr.status<300)resolve();else{let message='上传失败，请重试';try{message=JSON.parse(xhr.responseText).message||message;}catch{}reject(new Error(message));}};xhr.onerror=()=>reject(new Error('上传中断，请检查网络后重试。之前发布的内容仍可打开。'));xhr.timeout=600000;xhr.ontimeout=()=>reject(new Error('上传超时，请重试'));xhr.onabort=()=>reject(new Error('上传已结束'));signal?.addEventListener('abort',()=>xhr.abort(),{once:true});if(signal?.aborted){xhr.abort();reject(new Error('上传已结束'));return;}xhr.send(file);});}
 const size=(n?:number)=>n?`${Number((n/1000000).toFixed(1))} MB`:'正在读取限制';
 const exportInstructions = `请将当前原型导出为已编译完成、可直接在浏览器访问的静态网页。
-请提供包含首页 index.html 以及完整 JavaScript、CSS、图片、字体等资源的 dist 文件夹或全部编译产物，也可以提供 ZIP。发布平台会自动处理上传内容，无需用户自行打包。
+单个 HTML 文件可直接上传，文件名不限，页面所需资源应内联。多文件原型请提供包含首页 index.html 以及完整 JavaScript、CSS、图片、字体等资源的 dist 文件夹或全部编译产物，也可以提供 ZIP。发布平台会自动处理上传内容，无需用户自行打包或改名单文件。
 不要仅提供源代码、依赖目录或需要安装依赖、在线编译、运行后端才能访问的项目。
 如果页面依赖外部 API 或第三方资源，请确保它们自身可访问，并正确配置访问权限；发布平台不提供业务后端或保证这些外部服务可用。
 请检查导出的页面、样式、图片及主要跳转正常。`;
@@ -200,7 +200,7 @@ function App(){
 }
 
 function UploadHelp({config,copy}:{config:Config;copy:(text:string,message?:string,errorMessage?:string)=>Promise<void>}){
- return <div className="upload-help"><details><summary>文件要求与上传限制</summary><p>选择已导出的完整网页，文件夹、里面的全部内容或 ZIP 都可以，需包含首页 index.html。</p><p>压缩包上限 {size(config.maxUploadBytes)} · 文件总量 {size(config.maxExpandedBytes)}</p><button type="button" onClick={()=>copy(exportInstructions,"导出说明已复制","复制失败，请手动复制下方说明")}>复制导出说明给 AI</button><textarea readOnly rows={5} value={exportInstructions} aria-label="给 AI 的导出说明"/></details></div>;
+ return <div className="upload-help"><details><summary>文件要求与上传限制</summary><p>单个 HTML 文件可直接上传，无需改名。多文件原型可选择文件夹、全部内容或 ZIP，需包含首页 index.html。</p><p>压缩包上限 {size(config.maxUploadBytes)} · 文件总量 {size(config.maxExpandedBytes)}</p><button type="button" onClick={()=>copy(exportInstructions,"导出说明已复制","复制失败，请手动复制下方说明")}>复制导出说明给 AI</button><textarea readOnly rows={5} value={exportInstructions} aria-label="给 AI 的导出说明"/></details></div>;
 }
 function CreateProjectModal({config,onClose,onChange}:{config:Config;onClose:()=>void;onChange:()=>Promise<unknown>}){
  const [name,setName]=useState(''),[selection,setSelection]=useState<Selection|null>(null);

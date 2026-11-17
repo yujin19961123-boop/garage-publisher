@@ -110,6 +110,9 @@ func (a *app) previewWithPrefix(w http.ResponseWriter, r *http.Request, public, 
 		return
 	}
 	defer f.Close()
+	if servePrototypeWithPathnameCompatibility(w, r, f, info, root, prefix) {
+		return
+	}
 	if servePrototypeWithFavicon(w, r, f, info, prefix) {
 		return
 	}

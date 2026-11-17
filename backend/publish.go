@@ -162,10 +162,23 @@ func unpack(archive, dest string) error {
 	return normalizeEntry(dest)
 }
 
-// Only strip a chain of single enclosing directories; never guess among pages.
+// Strip only a chain of single enclosing directories. A lone HTML file is an
+// unambiguous homepage; normalize its staging filename, never the original ZIP.
 func normalizeEntry(dest string) error {
 	current := dest
 	for depth := 0; depth <= 20; depth++ {
+		entries, e := os.ReadDir(current)
+		if e != nil {
+			return e
+		}
+		if len(entries) == 1 && entries[0].Type().IsRegular() && entries[0].Name() != "index.html" {
+			ext := filepath.Ext(entries[0].Name())
+			if strings.EqualFold(ext, ".html") || strings.EqualFold(ext, ".htm") {
+				if e = os.Rename(filepath.Join(current, entries[0].Name()), filepath.Join(current, "index.html")); e != nil {
+					return e
+				}
+			}
+		}
 		info, e := os.Stat(filepath.Join(current, "index.html"))
 		if e == nil && info.Mode().IsRegular() {
 			if current == dest {
@@ -183,10 +196,6 @@ func normalizeEntry(dest string) error {
 				return e
 			}
 			return os.Rename(temp, dest)
-		}
-		entries, e := os.ReadDir(current)
-		if e != nil {
-			return e
 		}
 		if len(entries) != 1 || !entries[0].IsDir() {
 			break

@@ -29,6 +29,8 @@ export function validateSelection(selection:Selection,limits:UploadLimits){
  // Fail before creating a project when the selected content cannot have a web entry.
  let content=selection.items.map(x=>x.path).filter(p=>!p.split('/').some(s=>s==='__MACOSX'||s==='.DS_Store'||s.startsWith('._')));
  while(!content.includes('index.html')){
+  // Keep the selected filename; the server normalizes its private copy.
+  if(content.length===1&&/^[^/]+\.html?$/i.test(content[0]))break;
   if(!content.length||content.some(p=>!p.includes('/')))throw new Error(zips.some(x=>x.path===x.file.name)?'ZIP 请单独上传，或选择包含首页的完整原型文件':'没有找到唯一的首页文件 index.html，请选择已导出的完整原型');
   const folder=content[0].split('/')[0];
   if(content.some(p=>!p.startsWith(folder+'/')))throw new Error('所选内容包含多个文件夹，无法确定首页，请只选择一个完整原型');

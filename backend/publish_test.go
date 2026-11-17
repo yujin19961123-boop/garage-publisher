@@ -53,6 +53,39 @@ func TestSymlinkRejected(t *testing.T) {
 		t.Fatal("accepted symbolic link")
 	}
 }
+
+func TestSingleHTMLHomepageNormalization(t *testing.T) {
+	for _, name := range []string{"prototype.html", "原型预览.HTML", "preview.htm", "INDEX.HTML", "dist/prototype.html", "export/dist/prototype.html"} {
+		t.Run(name, func(t *testing.T) {
+			archive := makeArchive(t, []string{name, ".DS_Store", "__MACOSX/._preview"})
+			before, err := os.ReadFile(archive)
+			if err != nil {
+				t.Fatal(err)
+			}
+			dest := t.TempDir()
+			if err := unpack(archive, dest); err != nil {
+				t.Fatal(err)
+			}
+			entry, err := os.ReadFile(filepath.Join(dest, "index.html"))
+			if err != nil || string(entry) != "hello" {
+				t.Fatal("single HTML not available as homepage", err)
+			}
+			entries, err := os.ReadDir(dest)
+			if err != nil || len(entries) != 1 || entries[0].Name() != "index.html" {
+				t.Fatal("staging filename was not normalized", err)
+			}
+			after, _ := os.ReadFile(archive)
+			if !bytes.Equal(before, after) {
+				t.Fatal("original ZIP modified")
+			}
+		})
+	}
+	for _, files := range [][]string{{"one.html", "two.html"}, {"prototype.html", "style.css"}, {"preview.txt"}, {"prototype.html", ".env"}, {"a/prototype.html", "b/prototype.html"}} {
+		if err := unpack(makeArchive(t, files), t.TempDir()); err == nil {
+			t.Fatalf("ambiguous or unsafe content accepted: %v", files)
+		}
+	}
+}
 func TestPassword(t *testing.T) {
 	h := hashPassword("correct horse battery")
 	if !checkPassword("correct horse battery", h) || checkPassword("wrong", h) {
